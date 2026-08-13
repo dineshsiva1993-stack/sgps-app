@@ -10946,7 +10946,7 @@ Error generating stack: ` + i.message + `
                     st = [],
                     hr = 0;
                 for (ge = 1; ge < N.FullPaths.length; ++ge)
-                    if (Re = N.FullPaths[ge].slice(Ze.length), ke = N.FileIndex[ge], !(!ke.size || !ke.content || Re == "Sh33tJ5")) {
+                    if (Re = N.FullPaths[ge].slice(Ze.length), ke = N.FileIndex[ge], !(!ke.size || !ke.content || Re == "Sh33tJ5")) {
                         var pn = De,
                             Wr = Ie(Re.length);
                         for (pe = 0; pe < Re.length; ++pe) Wr.write_shift(1, Re.charCodeAt(pe) & 127);
@@ -11083,7 +11083,7 @@ Error generating stack: ` + i.message + `
                     Q = H.boundary || "SheetJS";
                 Q = "------=" + Q;
                 for (var ee = ["MIME-Version: 1.0", 'Content-Type: multipart/related; boundary="' + Q.slice(2) + '"', "", "", ""], q = N.FullPaths[0], de = q, he = N.FileIndex[0], ue = 1; ue < N.FullPaths.length; ++ue)
-                    if (de = N.FullPaths[ue].slice(q.length), he = N.FileIndex[ue], !(!he.size || !he.content || de == "Sh33tJ5")) {
+                    if (de = N.FullPaths[ue].slice(q.length), he = N.FileIndex[ue], !(!he.size || !he.content || de == "Sh33tJ5")) {
                         de = de.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7E-\xFF]/g, function(st) {
                             return "_x" + st.charCodeAt(0).toString(16) + "_"
                         }).replace(/[\u0080-\uFFFF]/g, function(st) {
