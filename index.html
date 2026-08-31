@@ -80510,7 +80510,16 @@ In order to be iterable, non-array objects must have a [Symbol.iterator]() metho
         onUpdate: a,
         onDelete: i
     }) {
-        let [s, o] = (0, f.useState)($ee()), l = e.filter(h => h.role === "admin").length, u = (h, p) => {
+        let [s, o] = (0, f.useState)($ee()), [sgPwSavedId, sgSetPwSavedId] = (0, f.useState)(null), [sgPwDraft, sgSetPwDraft] = (0, f.useState)({}), sgSavePw = h => {
+            let val = Object.prototype.hasOwnProperty.call(sgPwDraft, h.id) ? sgPwDraft[h.id] : h.password;
+            if (!val || !val.trim()) return;
+            a({
+                ...h,
+                password: val.trim()
+            });
+            sgSetPwSavedId(h.id);
+            setTimeout(() => sgSetPwSavedId(ke => ke === h.id ? null : ke), 2000)
+        }, l = e.filter(h => h.role === "admin").length, u = (h, p) => {
             let g = (h.menus || []).includes(p) ? h.menus.filter(v => v !== p) : [...h.menus || [], p];
             a({
                 ...h,
@@ -80641,13 +80650,16 @@ In order to be iterable, non-array objects must have a [Symbol.iterator]() metho
             className: "text-[11px] text-stone-400"
         }, "Password:"), f.default.createElement("input", {
             type: "text",
-            value: h.password,
-            onChange: p => a({
-                ...h,
-                password: p.target.value
-            }),
+            value: Object.prototype.hasOwnProperty.call(sgPwDraft, h.id) ? sgPwDraft[h.id] : h.password,
+            onChange: p => sgSetPwDraft(dv => ({
+                ...dv,
+                [h.id]: p.target.value
+            })),
             className: "text-xs rounded-md border border-stone-200 px-2 py-1 outline-none focus:border-amber-500 w-32"
-        })), h.role === "admin" ? f.default.createElement("p", {
+        }), f.default.createElement("button", {
+            onClick: () => sgSavePw(h),
+            className: "text-[10px] font-bold rounded-md px-2 py-1 border border-amber-500 bg-amber-500 text-stone-900 active:bg-amber-400"
+        }, sgPwSavedId === h.id ? "Saved" : "Save")), h.role === "admin" ? f.default.createElement("p", {
             className: "text-[11px] text-stone-400"
         }, "Full access to every menu and factory.") : f.default.createElement(f.default.Fragment, null, f.default.createElement("h5", {
             className: "text-[10px] font-bold text-stone-400 uppercase tracking-wide mb-1"
