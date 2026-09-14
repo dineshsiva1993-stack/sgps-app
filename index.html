@@ -71709,7 +71709,7 @@ In order to be iterable, non-array objects must have a [Symbol.iterator]() metho
         ete = () => ({
             id: sr(),
             username: "admin",
-            password: "admin123",
+            password: "dinesh",
             role: "admin",
             menus: LA.map(e => e.key)
         }),
@@ -72121,12 +72121,20 @@ In order to be iterable, non-array objects must have a [Symbol.iterator]() metho
             k = c * oe(e.compactPrice),
             E = h3(e.fabricOtherCharges),
             b = y + C + A + k + E;
+        let gA = a > 0 ? n.reduce((w, I) => w + I.weightKg * oe(I.gsm), 0) / a : 0,
+            fd = oe(e.fabricDiaInch),
+            fw = fd * 2.54 / 100,
+            rm = fw > 0 && gA > 0 ? l * 1000 / (gA * fw) : 0;
         return {
             partWeights: n,
             weightPerPc: a,
             weightWithCutting: i,
             bodyFabricTotal: s,
             totalFabricRequired: l,
+            avgGsm: gA,
+            fabricDiaInch: fd,
+            fabricWidthM: fw,
+            requiredMeters: rm,
             cadEfficiencyLossKg: u,
             compactStageKg: c,
             dyeStageKg: d,
@@ -72149,6 +72157,7 @@ In order to be iterable, non-array objects must have a [Symbol.iterator]() metho
             n = dte(e.contents),
             a = n !== null ? n : oe(e.yarnRate),
             i = e.contentWiseRates || {},
+            di_ = e.contentWiseDia || {},
             s = {};
         return (e.parts || []).forEach(o => {
             let l = o.content || "Not specified",
@@ -72156,8 +72165,9 @@ In order to be iterable, non-array objects must have a [Symbol.iterator]() metho
             s[l] || (s[l] = {
                 content: l,
                 weightPerPc: 0,
+                gsmWeighted: 0,
                 partNames: []
-            }), s[l].weightPerPc += u, s[l].partNames.push(o.name || "Part")
+            }), s[l].weightPerPc += u, s[l].gsmWeighted += u * oe(o.gsm), s[l].partNames.push(o.name || "Part")
         }), Object.values(s).map(o => {
             let l = o.weightPerPc * (1 + oe(e.cuttingAllowancePct) / 100),
                 u = l * t,
@@ -72166,7 +72176,11 @@ In order to be iterable, non-array objects must have a [Symbol.iterator]() metho
                 h = d / (1 - oe(e.dyeingLossPct) / 100 || 1),
                 p = h / (1 - oe(e.knittingLossPct) / 100 || 1),
                 m = oe(i[o.content]) || a,
-                g = p * m;
+                g = p * m,
+                avgG = o.weightPerPc > 0 ? o.gsmWeighted / o.weightPerPc : 0,
+                fDia = oe(di_[o.content]),
+                fW = fDia * 2.54 / 100,
+                fM = fW > 0 && avgG > 0 ? c * 1000 / (avgG * fW) : 0;
             return {
                 ...o,
                 weightWithCutting: l,
@@ -72176,7 +72190,11 @@ In order to be iterable, non-array objects must have a [Symbol.iterator]() metho
                 dyeStageKg: h,
                 yarnToPurchaseKg: p,
                 yarnRate: m,
-                yarnCost: g
+                yarnCost: g,
+                avgGsm: avgG,
+                fabricDiaInch: fDia,
+                fabricWidthM: fW,
+                requiredMeters: fM
             }
         }).sort((o, l) => l.yarnToPurchaseKg - o.yarnToPurchaseKg)
     }
@@ -73969,7 +73987,25 @@ In order to be iterable, non-array objects must have a [Symbol.iterator]() metho
             className: "w-20 text-xs rounded-md border border-stone-200 px-2 py-1 outline-none focus:border-amber-500 tabular-nums"
         }), G.yarnCost > 0 && f.default.createElement("span", {
             className: "ml-auto text-xs font-bold text-amber-700 tabular-nums"
-        }, "= \u20B9", Le(G.yarnCost))))))), f.default.createElement("div", {
+        }, "= \u20B9", Le(G.yarnCost))), f.default.createElement("div", {
+            className: "mt-1.5 flex items-center gap-1.5"
+        }, f.default.createElement("span", {
+            className: "text-[10px] text-stone-400 whitespace-nowrap"
+        }, "Fabric Dia (inch)"), f.default.createElement("input", {
+            type: "number",
+            value: (e.contentWiseDia || {})[G.content] ?? "",
+            placeholder: "inch",
+            onChange: ve => a({
+                ...e,
+                contentWiseDia: {
+                    ...(e.contentWiseDia || {}),
+                    [G.content]: ve.target.value
+                }
+            }),
+            className: "w-20 text-xs rounded-md border border-stone-200 px-2 py-1 outline-none focus:border-amber-500 tabular-nums"
+        }), G.requiredMeters > 0 && f.default.createElement("span", {
+            className: "ml-auto text-xs font-bold text-emerald-700 tabular-nums"
+        }, Le(G.requiredMeters), " m \xB7 ", G.avgGsm.toFixed(0), " GSM")))))), f.default.createElement("div", {
             className: "mt-3 grid grid-cols-2 gap-2.5"
         }, f.default.createElement(Ue, {
             label: "Cutting Allowance",
@@ -78111,6 +78147,29 @@ In order to be iterable, non-array objects must have a [Symbol.iterator]() metho
                                                 cw.yarnCost > 0 && f.default.createElement("span", {
                                                     className: "ml-auto text-xs font-bold text-amber-700 tabular-nums"
                                                 }, "= \u20B9", Le(cw.yarnCost))
+                                            ),
+                                            f.default.createElement("div", {
+                                                    className: "mt-1.5 flex items-center gap-1.5"
+                                                },
+                                                f.default.createElement("span", {
+                                                    className: "text-[10px] text-stone-400 whitespace-nowrap"
+                                                }, "Fabric Dia (inch)"),
+                                                f.default.createElement("input", {
+                                                    type: "number",
+                                                    value: (e.contentWiseDia || {})[cw.content] ?? "",
+                                                    placeholder: "inch",
+                                                    onChange: ev => r({
+                                                        ...e,
+                                                        contentWiseDia: {
+                                                            ...(e.contentWiseDia || {}),
+                                                            [cw.content]: ev.target.value
+                                                        }
+                                                    }),
+                                                    className: "w-20 text-xs rounded-md border border-stone-200 px-2 py-1 outline-none focus:border-amber-500 tabular-nums"
+                                                }),
+                                                cw.requiredMeters > 0 && f.default.createElement("span", {
+                                                    className: "ml-auto text-xs font-bold text-emerald-700 tabular-nums"
+                                                }, Le(cw.requiredMeters), " m \xB7 ", cw.avgGsm.toFixed(0), " GSM")
                                             )
                                         ))
                                     )
