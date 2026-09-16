@@ -79941,7 +79941,8 @@ In order to be iterable, non-array objects must have a [Symbol.iterator]() metho
         onAddLine: a,
         onUpdateLine: i,
         onDeleteLine: s,
-        onUpsertPlan: o
+        onUpsertPlan: o,
+        onDeletePlan: sgOnDeletePlan
     }) {
         let [l, u] = (0, f.useState)(e[0]?.id || ""), [c, d] = (0, f.useState)(vr()), [h, p] = (0, f.useState)(""), m = (0, f.useMemo)(() => Object.fromEntries(n.map(y => [y.id, y])), [n]), g = (0, f.useMemo)(() => r.filter(y => y.type === "feeding"), [r]);
         (0, f.useEffect)(() => {
@@ -79958,6 +79959,12 @@ In order to be iterable, non-array objects must have a [Symbol.iterator]() metho
         }, [sgMatchedStyleIds]);
         let v = () => {
                 !l || !h || (o(l, c, h, sgPlanStyleId || ""), p(""))
+            },
+            sgEditPlan = y => {
+                d(y.date), p(String(y.planQty)), y.styleId && sgSetPlanStyleId(y.styleId)
+            },
+            sgDeletePlanRow = y => {
+                typeof window < "u" && !window.confirm("Delete this plan entry for " + lr(y.date) + "?") || sgOnDeletePlan && sgOnDeletePlan(y.id)
             },
             x = (0, f.useMemo)(() => t.filter(y => y.lineId === l).slice().sort((y, C) => y.date < C.date ? 1 : -1).slice(0, 10).map(y => ({
                 ...y,
@@ -80076,9 +80083,11 @@ In order to be iterable, non-array objects must have a [Symbol.iterator]() metho
             className: "mt-3 space-y-1.5"
         }, x.map(y => f.default.createElement("div", {
             key: y.id,
-            className: "flex items-center justify-between text-xs bg-stone-50 rounded-md px-2.5 py-1.5"
+            className: "flex items-center justify-between gap-2 text-xs bg-stone-50 rounded-md px-2.5 py-1.5"
+        }, f.default.createElement("div", {
+            className: "flex items-center justify-between flex-1 gap-2 min-w-0"
         }, f.default.createElement("span", {
-            className: "font-semibold text-stone-600"
+            className: "font-semibold text-stone-600 shrink-0"
         }, lr(y.date), m[y.styleId] && f.default.createElement("span", {
             className: "text-stone-400 font-normal"
         }, " \xB7 ", m[y.styleId].styleNo)), f.default.createElement("span", {
@@ -80089,7 +80098,21 @@ In order to be iterable, non-array objects must have a [Symbol.iterator]() metho
             className: "text-stone-700"
         }, y.actualQty)), f.default.createElement("span", {
             className: `font-bold ${y.deviation>=0?"text-emerald-600":"text-red-600"}`
-        }, y.deviation >= 0 ? "+" : "", y.deviation))))), f.default.createElement("div", {
+        }, y.deviation >= 0 ? "+" : "", y.deviation)), f.default.createElement("div", {
+            className: "flex items-center gap-1 shrink-0"
+        }, f.default.createElement("button", {
+            onClick: () => sgEditPlan(y),
+            title: "Edit this plan",
+            className: "p-1 rounded text-stone-400 hover:text-amber-600 hover:bg-amber-50 active:bg-amber-100"
+        }, f.default.createElement(td, {
+            size: 13
+        })), f.default.createElement("button", {
+            onClick: () => sgDeletePlanRow(y),
+            title: "Delete this plan",
+            className: "p-1 rounded text-stone-400 hover:text-red-600 hover:bg-red-50 active:bg-red-100"
+        }, f.default.createElement(dl, {
+            size: 13
+        }))))))), f.default.createElement("div", {
             className: "rounded-2xl border border-stone-200 bg-white p-4"
         }, f.default.createElement("h4", {
             className: "flex items-center gap-1.5 text-xs font-bold text-stone-500 uppercase tracking-wide mb-3"
@@ -82235,6 +82258,7 @@ Floor note: "${g.trim()}"`,
                     }]
                 })
             },
+            sgDeleteLinePlan = ne => o(N => N.filter(M => M.id !== ne)),
             qt = ne => {
                 ne.month && Ne.some(N => N.month === ne.month) || d(N => [...N, {
                     ...ne,
@@ -82967,7 +82991,8 @@ Floor note: "${g.trim()}"`,
             onAddLine: tl,
             onUpdateLine: Ti,
             onDeleteLine: hi,
-            onUpsertPlan: pi
+            onUpsertPlan: pi,
+            onDeletePlan: sgDeleteLinePlan
         }), w === "planactual" && f.default.createElement(YOe, {
             lines: Me,
             linePlans: He,
