@@ -71647,23 +71647,26 @@ In order to be iterable, non-array objects must have a [Symbol.iterator]() metho
             key: "cutting",
             label: "Cutting Entry"
         }, {
-            key: "production",
-            label: "Production Entry"
-        }, {
             key: "feeding",
             label: "Feeding Entry"
         }, {
-            key: "downtime",
-            label: "Downtime Entry"
+            key: "production",
+            label: "Production Entry"
         }, {
-            key: "ot",
-            label: "OT Entry"
+            key: "rework",
+            label: "Rework Entry"
         }, {
             key: "rejection",
             label: "Rejection Entry"
         }, {
             key: "packing",
             label: "Packing Entry"
+        }, {
+            key: "ot",
+            label: "OT Entry"
+        }, {
+            key: "downtime",
+            label: "Downtime Entry"
         }, {
             key: "fabric",
             label: "Fabric"
@@ -72468,6 +72471,21 @@ In order to be iterable, non-array objects must have a [Symbol.iterator]() metho
             o = a("packing");
         return {
             cut: i,
+            sew: s,
+            pack: o,
+            cutSewWip: Math.max(i - s, 0),
+            sewPackWip: Math.max(s - o, 0)
+        }
+    }
+
+    function sgLineWip(e, t, r) {
+        let n = t.filter(l => l.lineId === e && (!r || l.date <= r)),
+            a = l => n.filter(u => u.type === l).reduce((u, c) => u + oe(c.qty), 0),
+            i = a("feeding"),
+            s = a("sewing"),
+            o = a("packing");
+        return {
+            feed: i,
             sew: s,
             pack: o,
             cutSewWip: Math.max(i - s, 0),
@@ -74676,8 +74694,8 @@ In order to be iterable, non-array objects must have a [Symbol.iterator]() metho
         }), " Mark as Shipped")))
     }
     var s3 = ["Fabric Fault", "Cutting Mistake", "Shade Variation", "Panel Shortage", "Other"],
-        o3 = ["Stitching Fault", "Measurement Fault", "Print/Embroidery Fault", "Fabric Fault", "Other"],
-        l3 = ["Machine Breakdown", "Power Cut", "Material Shortage", "Line Setup / Style Change", "Other"],
+        o3 = ["Skip Stitch", "Broken Stitch", "Loose Stitch", "Tight Stitch", "Uneven Stitch", "Open Seam", "Seam Puckering", "Seam Slippage", "Raw Edge", "Wrong SPI", "Uneven SPI", "Run-off Stitch", "Needle Damage", "Needle Hole", "Fabric Damage", "Oil Stain", "Thread Stain", "Wrong Thread", "Missing Top Stitch", "Extra Stitch", "Missing Stitch", "Wrong Stitch Line", "Wavy Stitch", "Twisted Seam", "Pleat", "Puckering", "Panel Mismatch", "Panel Upside Down", "Panel Wrong Side", "Panel Wrong Size", "Wrong Panel Joining", "Uneven Gathering", "Uneven Shirring", "Wrong Collar", "Collar Uneven", "Collar Twist", "Neck Uneven", "Shoulder Mismatch", "Sleeve Twist", "Sleeve Mismatch", "Armhole Uneven", "Side Seam Twist", "Side Seam Mismatch", "Hem Uneven", "Hem Wavy", "Pocket Uneven", "Pocket Position Wrong", "Pocket Shape Wrong", "Zipper Uneven", "Zipper Wave", "Buttonhole Wrong Position", "Buttonhole Size Wrong", "Button Missing", "Button Wrong Position", "Bartack Missing", "Bartack Wrong Position", "Label Wrong Position", "Label Upside Down", "Label Missing", "Elastic Uneven", "Binding Uneven", "Binding Open", "Overlock Missing", "Overlock Uneven", "Flatlock Uneven", "Wrong Attachment", "Wrong Operation", "Wrong Component", "Measurement Out of Tolerance", "Shape Distortion", "Stitch Density Variation", "Other"],
+        l3 = ["Machine Breakdown", "Power Cut", "Material Shortage", "Line Setup / Style Change", "Feeding Issue", "Other"],
         u3 = [{
             key: "cutting",
             label: "Cutting"
@@ -74742,10 +74760,15 @@ In order to be iterable, non-array objects must have a [Symbol.iterator]() metho
         onUpdate: a,
         onDelete: i
     }) {
-        let [s, o] = (0, f.useState)(e[0]?.id || ""), [l, u] = (0, f.useState)(vr()), [c, d] = (0, f.useState)(""), [h, p] = (0, f.useState)(""), [m, g] = (0, f.useState)(""), [v, x] = (0, f.useState)(""), [y, C] = (0, f.useState)(""), [A, k] = (0, f.useState)(null), [sgCutMp, sgSetCutMp] = (0, f.useState)(""), [sgCutOef, sgSetCutOef] = (0, f.useState)("");
+        let [s, o] = (0, f.useState)(e[0]?.id || ""), [l, u] = (0, f.useState)(vr()), [c, d] = (0, f.useState)(""), [h, p] = (0, f.useState)(""), [m, g] = (0, f.useState)(""), [v, x] = (0, f.useState)(""), [y, C] = (0, f.useState)(""), [A, k] = (0, f.useState)(null), [sgCutMp, sgSetCutMp] = (0, f.useState)(""), [sgCutOef, sgSetCutOef] = (0, f.useState)(""), [sgShiftTick, sgSetShiftTick] = (0, f.useState)(0), [sgShiftSaved, sgSetShiftSaved] = (0, f.useState)(!1);
         (0, f.useEffect)(() => {
             !s && e[0] && o(e[0].id)
         }, [e]);
+        (0, f.useEffect)(() => {
+            if (!c) return;
+            let sgLineStyle = Ff(c, e);
+            sgLineStyle && o(sgLineStyle.id)
+        }, [c, e]);
         let E = e.find(K => K.id === s),
             b = (0, f.useMemo)(() => jA(E), [E]),
             w = (0, f.useMemo)(() => Iy(c, s, t, E), [c, s, t, E]);
@@ -74773,7 +74796,7 @@ In order to be iterable, non-array objects must have a [Symbol.iterator]() metho
                 k(null), x(""), p(""), g(""), sgSetCutMp(""), sgSetCutOef("")
             },
             L = () => {
-                !s || oe(v) <= 0 || (A ? (a(A, {
+                !s || !c || oe(v) <= 0 || (A ? (a(A, {
                     qty: v,
                     lineId: c || void 0,
                     colour: h || void 0,
@@ -74800,6 +74823,49 @@ In order to be iterable, non-array objects must have a [Symbol.iterator]() metho
         }) : f.default.createElement("div", {
             className: "space-y-4 pb-16"
         }, f.default.createElement("div", {
+            className: "rounded-2xl border border-amber-200 bg-amber-50 p-4"
+        }, f.default.createElement("div", {
+            className: "flex items-center justify-between mb-2.5"
+        }, f.default.createElement("h4", {
+            className: "flex items-center gap-1.5 text-xs font-bold text-stone-600 uppercase tracking-wide"
+        }, f.default.createElement(Kn, {
+            size: 13
+        }), " Factory Hours"), f.default.createElement("span", {
+            className: "text-[11px] font-semibold text-stone-500"
+        }, `Currently ${Gh/60}h from ${lOe}:00`)), f.default.createElement("p", {
+            className: "text-[11px] text-stone-500 mb-2.5"
+        }, "Set once here \u2014 applies automatically to Cutting, Production and Packing entry targets & efficiency."), f.default.createElement("div", {
+            className: "grid grid-cols-2 gap-2"
+        }, f.default.createElement("div", null, f.default.createElement("label", {
+            className: "text-[10px] text-stone-400"
+        }, "Shift Hours"), f.default.createElement("input", {
+            id: "sgCutShiftHoursInput",
+            type: "number",
+            step: "0.5",
+            min: "1",
+            defaultValue: Gh / 60,
+            className: "w-full text-xs rounded-md border border-stone-200 px-2 py-1.5 outline-none focus:border-amber-500 bg-white"
+        })), f.default.createElement("div", null, f.default.createElement("label", {
+            className: "text-[10px] text-stone-400"
+        }, "Start Hour (24h, e.g. 8)"), f.default.createElement("input", {
+            id: "sgCutShiftStartInput",
+            type: "number",
+            min: "0",
+            max: "23",
+            defaultValue: lOe,
+            className: "w-full text-xs rounded-md border border-stone-200 px-2 py-1.5 outline-none focus:border-amber-500 bg-white"
+        }))), f.default.createElement("button", {
+            onClick: () => {
+                let sgH = parseFloat(document.getElementById("sgCutShiftHoursInput").value) || 8,
+                    sgS = parseInt(document.getElementById("sgCutShiftStartInput").value),
+                    sgMin = Math.round(sgH * 60),
+                    sgStart = isNaN(sgS) ? 8 : sgS;
+                localStorage.setItem("sgps_shiftMinutes", String(sgMin)), localStorage.setItem("sgps_shiftStartHour", String(sgStart)), Gh = sgMin, lOe = sgStart, sgSetShiftTick(sgT => sgT + 1), sgSetShiftSaved(!0), setTimeout(() => sgSetShiftSaved(!1), 2000)
+            },
+            className: "mt-2 w-full rounded-md bg-amber-500 text-stone-900 text-xs font-bold py-1.5 active:bg-amber-400"
+        }, "Save Factory Hours"), sgShiftSaved && f.default.createElement("p", {
+            className: "mt-1 text-center text-[11px] text-emerald-600 font-semibold"
+        }, "\u2713 Factory Hours saved \u2014 applied to Cutting, Production & Packing")), f.default.createElement("div", {
             className: "rounded-2xl border border-stone-200 bg-white p-4 space-y-4"
         }, f.default.createElement(qh, {
             styles: e,
@@ -74809,8 +74875,13 @@ In order to be iterable, non-array objects must have a [Symbol.iterator]() metho
             date: l,
             setDate: u,
             lineId: c,
-            setLineId: d
-        }), I && f.default.createElement("div", {
+            setLineId: d,
+            lineLabel: "Line (drives Style below)"
+        }), c && Ff(c, e) && f.default.createElement("p", {
+            className: "text-[11px] text-emerald-600 -mt-2"
+        }, "Style auto-set from Order Efficiency & Line Booking for this line."), !c && f.default.createElement("p", {
+            className: "text-[11px] text-amber-600 -mt-2"
+        }, "Select a Line above so this cutting entry is saved style & line wise."), I && f.default.createElement("div", {
             className: "rounded-lg bg-stone-100 border border-stone-200 px-3 py-2.5"
         }, f.default.createElement(Je, {
             label: "Cut \u2192 Sew WIP",
@@ -74897,7 +74968,8 @@ In order to be iterable, non-array objects must have a [Symbol.iterator]() metho
             suffix: "%"
         }))), f.default.createElement("button", {
             onClick: L,
-            className: "w-full rounded-xl bg-amber-500 text-stone-900 font-bold py-3 text-sm active:bg-amber-400"
+            disabled: !c || !s || oe(v) <= 0,
+            className: "w-full rounded-xl bg-amber-500 text-stone-900 font-bold py-3 text-sm active:bg-amber-400 disabled:opacity-40 disabled:cursor-not-allowed"
         }, A ? "Update Cutting Entry" : "Save Cutting Entry"), y && f.default.createElement("p", {
             className: "text-center text-xs text-emerald-600 font-semibold"
         }, y)), S.length > 0 && f.default.createElement("div", {
@@ -75550,10 +75622,15 @@ In order to be iterable, non-array objects must have a [Symbol.iterator]() metho
         onUpdate: a,
         onDelete: i
     }) {
-        let [s, o] = (0, f.useState)(e[0]?.id || ""), [l, u] = (0, f.useState)(vr()), [c, d] = (0, f.useState)(""), [h, p] = (0, f.useState)(""), [m, g] = (0, f.useState)(s3[0]), [v, x] = (0, f.useState)(""), [y, C] = (0, f.useState)(""), [A, k] = (0, f.useState)(o3[0]), [E, b] = (0, f.useState)(""), [w, I] = (0, f.useState)(""), [S, P] = (0, f.useState)(""), [D, L] = (0, f.useState)(null), [K, ae] = (0, f.useState)(null);
+        let [s, o] = (0, f.useState)(e[0]?.id || ""), [l, u] = (0, f.useState)(vr()), [c, d] = (0, f.useState)(""), [h, p] = (0, f.useState)(""), [m, g] = (0, f.useState)(s3[0]), [v, x] = (0, f.useState)(""), [y, C] = (0, f.useState)(""), [A, k] = (0, f.useState)(o3[0]), [E, b] = (0, f.useState)(""), [w, I] = (0, f.useState)(""), [S, P] = (0, f.useState)(""), [D, L] = (0, f.useState)(null), [K, ae] = (0, f.useState)(null), [sgRejHour, sgSetRejHour] = (0, f.useState)(ug[0]);
         (0, f.useEffect)(() => {
             !s && e[0] && o(e[0].id)
         }, [e]);
+        (0, f.useEffect)(() => {
+            if (!c) return;
+            let sgLineStyle = Ff(c, e);
+            sgLineStyle && o(sgLineStyle.id)
+        }, [c, e]);
         let R = e.find(O => O.id === s),
             U = (0, f.useMemo)(() => Iy(c, s, t, R), [c, s, t, R]);
         (0, f.useEffect)(() => {
@@ -75563,13 +75640,13 @@ In order to be iterable, non-array objects must have a [Symbol.iterator]() metho
         }, [U]);
         let W = t.filter(O => O.styleId === s && O.date === l && ["cuttingReject", "sewingReject", "sewingLoss"].includes(O.type)),
             j = O => {
-                L(O.id), ae(O.type), d(O.lineId || ""), O.type === "cuttingReject" && (p(String(O.qty)), g(O.reason || s3[0]), x(O.size || "")), O.type === "sewingReject" && (C(String(O.qty)), k(O.reason || o3[0]), b(O.size || "")), O.type === "sewingLoss" && I(String(O.qty))
+                L(O.id), ae(O.type), d(O.lineId || ""), O.type === "cuttingReject" && (p(String(O.qty)), g(O.reason || s3[0]), x(O.size || "")), O.type === "sewingReject" && (C(String(O.qty)), k(O.reason || o3[0]), b(O.size || ""), sgSetRejHour(O.hour || ug[0])), O.type === "sewingLoss" && I(String(O.qty))
             },
             Y = () => {
-                L(null), ae(null), p(""), x(""), C(""), b(""), I("")
+                L(null), ae(null), p(""), x(""), C(""), b(""), I(""), sgSetRejHour(ug[0])
             },
             V = () => {
-                if (!s) return;
+                if (!s || !c) return;
                 if (D) {
                     let Z = {
                         lineId: c || void 0
@@ -75583,7 +75660,8 @@ In order to be iterable, non-array objects must have a [Symbol.iterator]() metho
                         ...Z,
                         qty: y,
                         reason: A,
-                        size: E || void 0
+                        size: E || void 0,
+                        hour: sgRejHour || void 0
                     }), K === "sewingLoss" && (Z = {
                         ...Z,
                         qty: w
@@ -75608,7 +75686,8 @@ In order to be iterable, non-array objects must have a [Symbol.iterator]() metho
                     qty: y,
                     reason: A,
                     lineId: c || void 0,
-                    size: E || void 0
+                    size: E || void 0,
+                    hour: sgRejHour || void 0
                 }), oe(w) > 0 && O.push({
                     id: sr(),
                     styleId: s,
@@ -75634,8 +75713,13 @@ In order to be iterable, non-array objects must have a [Symbol.iterator]() metho
             date: l,
             setDate: u,
             lineId: c,
-            setLineId: d
-        }), D && f.default.createElement("div", {
+            setLineId: d,
+            lineLabel: "Line (drives Style below)"
+        }), c && Ff(c, e) && f.default.createElement("p", {
+            className: "text-[11px] text-emerald-600"
+        }, "Style auto-set from Order Efficiency & Line Booking for this line."), !c && f.default.createElement("p", {
+            className: "text-[11px] text-amber-600"
+        }, "Select a Line above so rejects are saved hour, style & line wise \u2014 this feeds DHU / RFT / Top Defect on the dashboard."), D && f.default.createElement("div", {
             className: "flex items-center justify-between rounded-lg bg-amber-50 border border-amber-300 px-3 py-1.5"
         }, f.default.createElement("span", {
             className: "text-[11px] font-bold text-amber-700 uppercase tracking-wide"
@@ -75673,7 +75757,12 @@ In order to be iterable, non-array objects must have a [Symbol.iterator]() metho
             icon: Ln
         }, f.default.createElement("div", {
             className: "grid grid-cols-2 sm:grid-cols-3 gap-2.5"
-        }, f.default.createElement(Ue, {
+        }, f.default.createElement(ki, {
+            label: "Hour Slot",
+            value: sgRejHour,
+            onChange: sgSetRejHour,
+            options: ug
+        }), f.default.createElement(Ue, {
             label: "Reject Qty",
             value: y,
             onChange: C,
@@ -75706,7 +75795,8 @@ In order to be iterable, non-array objects must have a [Symbol.iterator]() metho
             suffix: "pcs"
         })), f.default.createElement("button", {
             onClick: V,
-            className: "w-full rounded-xl bg-amber-500 text-stone-900 font-bold py-3 text-sm active:bg-amber-400"
+            disabled: !s || !c,
+            className: "w-full rounded-xl bg-amber-500 text-stone-900 font-bold py-3 text-sm active:bg-amber-400 disabled:opacity-40 disabled:cursor-not-allowed"
         }, D ? "Update Entry" : "Save Rejection Entries"), S && f.default.createElement("p", {
             className: "text-center text-xs text-emerald-600 font-semibold"
         }, S)), W.length > 0 && f.default.createElement("div", {
@@ -75718,7 +75808,7 @@ In order to be iterable, non-array objects must have a [Symbol.iterator]() metho
         }, W.map(O => f.default.createElement(zh, {
             key: O.id,
             editing: D === O.id,
-            label: `${O.type}${O.reason?` \xB7 ${O.reason}`:""}${O.size?` \xB7 Size ${O.size}`:""}`,
+            label: `${O.type}${O.hour?` \xB7 ${O.hour}`:""}${O.reason?` \xB7 ${O.reason}`:""}${O.size?` \xB7 Size ${O.size}`:""}`,
             value: `${O.qty} pcs`,
             onEdit: () => j(O),
             onDelete: () => {
@@ -75727,6 +75817,174 @@ In order to be iterable, non-array objects must have a [Symbol.iterator]() metho
         })))))
     }
 
+    function sgReworkEntry({
+        styles: e,
+        entries: t,
+        lines: r,
+        onAdd: n,
+        onUpdate: a,
+        onDelete: i
+    }) {
+        let [s, o] = (0, f.useState)(e[0]?.id || ""), [l, u] = (0, f.useState)(vr()), [c, d] = (0, f.useState)(""), [h, p] = (0, f.useState)(ug[0]), [m, g] = (0, f.useState)(""), [v, x] = (0, f.useState)(""), [y, C] = (0, f.useState)(""), [A, k] = (0, f.useState)(null), [sgRows, sgSetRows] = (0, f.useState)([]);
+        (0, f.useEffect)(() => {
+            !s && e[0] && o(e[0].id)
+        }, [e]), (0, f.useEffect)(() => {
+            if (!c) return;
+            let sgLineStyle = Ff(c, e);
+            sgLineStyle && o(sgLineStyle.id)
+        }, [c, e]);
+        let sgSelectedStyle = e.find(O => O.id === s),
+            sgOpReasons = (sgSelectedStyle?.obOperations || []).map(O => O.name).filter(Boolean),
+            sgReasonOptions = sgOpReasons.length > 0 ? sgOpReasons : o3;
+        (0, f.useEffect)(() => {
+            sgSetRows([])
+        }, [s, c, l]);
+        let w = t.filter(O => O.styleId === s && O.date === l && O.type === "rework"),
+            I = O => {
+                k(O.id), d(O.lineId || ""), p(O.hour || ug[0]), g(String(O.qty)), x(O.reason || ""), sgSetRows([])
+            },
+            S = () => {
+                k(null), g(""), x("")
+            },
+            sgAddRow = () => {
+                !v.trim() || oe(m) <= 0 || (sgSetRows([...sgRows, {
+                    id: sr(),
+                    reason: v.trim(),
+                    qty: m
+                }]), g(""), x(""))
+            },
+            sgRemoveRow = O => sgSetRows(sgRows.filter(E => E.id !== O)),
+            P = () => {
+                if (!s || !c) return;
+                if (A) {
+                    oe(m) <= 0 || (a(A, {
+                        qty: m,
+                        lineId: c || void 0,
+                        hour: h || void 0,
+                        reason: v || void 0
+                    }), C(`Updated rework entry for ${l} (${h})`), k(null), g(""), x(""), setTimeout(() => C(""), 2500));
+                    return
+                }
+                let sgFinalRows = [...sgRows];
+                v.trim() && oe(m) > 0 && sgFinalRows.push({
+                    id: sr(),
+                    reason: v.trim(),
+                    qty: m
+                });
+                sgFinalRows.length !== 0 && (n(sgFinalRows.map(O => ({
+                    id: sr(),
+                    styleId: s,
+                    date: l,
+                    type: "rework",
+                    qty: O.qty,
+                    lineId: c || void 0,
+                    hour: h || void 0,
+                    reason: O.reason || void 0
+                }))), C(sgFinalRows.length > 1 ? `Saved ${sgFinalRows.length} rework entries for ${l} (${h})` : `Saved rework entry for ${l} (${h})`), sgSetRows([]), g(""), x(""), setTimeout(() => C(""), 2500))
+            };
+        return e.length === 0 ? f.default.createElement(ra, {
+            icon: Ln,
+            title: "Add a style first",
+            body: "Create a style under the Styles tab before logging rework entries."
+        }) : f.default.createElement("div", {
+            className: "space-y-4 pb-16"
+        }, f.default.createElement("div", {
+            className: "rounded-2xl border border-stone-200 bg-white p-4 space-y-4"
+        }, f.default.createElement(qh, {
+            styles: e,
+            lines: r,
+            styleId: s,
+            setStyleId: o,
+            date: l,
+            setDate: u,
+            lineId: c,
+            setLineId: d,
+            lineLabel: "Line (drives Style below)"
+        }), c && Ff(c, e) && f.default.createElement("p", {
+            className: "text-[11px] text-emerald-600 -mt-2"
+        }, "Style auto-set from Order Efficiency & Line Booking for this line."), !c && f.default.createElement("p", {
+            className: "text-[11px] text-amber-600 -mt-2"
+        }, "Select a Line above so rework is saved hour, style & line wise."), f.default.createElement(ql, null), f.default.createElement(Mt, {
+            title: "Rework Entry (hour, style & line wise)",
+            icon: Ln
+        }, A && f.default.createElement("div", {
+            className: "flex items-center justify-between rounded-lg bg-amber-50 border border-amber-300 px-3 py-1.5 mb-2.5"
+        }, f.default.createElement("span", {
+            className: "text-[11px] font-bold text-amber-700 uppercase tracking-wide"
+        }, "Editing entry"), f.default.createElement("button", {
+            onClick: S,
+            className: "text-[11px] font-semibold text-amber-700 active:text-amber-800"
+        }, "Cancel")), f.default.createElement("div", {
+            className: "grid grid-cols-2 sm:grid-cols-3 gap-2.5"
+        }, f.default.createElement(ki, {
+            label: "Hour Slot",
+            value: h,
+            onChange: p,
+            options: ug
+        }), f.default.createElement(Ue, {
+            label: "Reworked Qty",
+            value: m,
+            onChange: g,
+            suffix: "pcs"
+        }), f.default.createElement("label", {
+            className: "flex flex-col gap-1"
+        }, f.default.createElement("span", {
+            className: "text-[10px] uppercase tracking-wider text-stone-500 font-semibold"
+        }, sgOpReasons.length > 0 ? "Reworked From (Operation)" : "Reworked From (Reason)"), f.default.createElement("input", {
+            type: "text",
+            list: "sgReworkReasonOptions",
+            value: v,
+            onChange: O => x(O.target.value),
+            placeholder: "Type to search...",
+            autoComplete: "off",
+            className: "rounded-xl border border-stone-200 bg-white px-3 py-2.5 text-sm outline-none transition-colors focus:border-amber-500 focus:ring-2 focus:ring-amber-500/20 hover:border-stone-300"
+        }), f.default.createElement("datalist", {
+            id: "sgReworkReasonOptions"
+        }, sgReasonOptions.map(O => f.default.createElement("option", {
+            key: O,
+            value: O
+        }))))), !A && f.default.createElement("button", {
+            type: "button",
+            onClick: sgAddRow,
+            disabled: !v.trim() || oe(m) <= 0,
+            className: "mt-2.5 w-full rounded-xl border border-amber-400 text-amber-700 font-semibold py-2 text-xs active:bg-amber-50 disabled:opacity-40 disabled:cursor-not-allowed"
+        }, "+ Add another mistake for this hour"), sgRows.length > 0 && f.default.createElement("div", {
+            className: "mt-2.5 space-y-1.5"
+        }, sgRows.map(O => f.default.createElement("div", {
+            key: O.id,
+            className: "flex items-center justify-between rounded-lg bg-stone-50 border border-stone-200 px-3 py-1.5"
+        }, f.default.createElement("span", {
+            className: "text-xs text-stone-600"
+        }, O.reason, " \xB7 ", f.default.createElement("b", null, O.qty, " pcs")), f.default.createElement("button", {
+            onClick: () => sgRemoveRow(O.id),
+            className: "text-stone-300 active:text-red-600 shrink-0"
+        }, f.default.createElement(gn, {
+            size: 13
+        })))))), sgOpReasons.length === 0 && f.default.createElement("p", {
+            className: "text-[11px] text-stone-400 -mt-2"
+        }, "Add operations under this style's Operation Bulletin to select rework reason operation-wise."), f.default.createElement("button", {
+            onClick: P,
+            disabled: !s || !c || (A ? oe(m) <= 0 : sgRows.length === 0 && (!v.trim() || oe(m) <= 0)),
+            className: "w-full rounded-xl bg-amber-500 text-stone-900 font-bold py-3 text-sm active:bg-amber-400 disabled:opacity-40 disabled:cursor-not-allowed"
+        }, A ? "Update Rework Entry" : sgRows.length > 0 ? `Save ${sgRows.length + (v.trim() && oe(m) > 0 ? 1 : 0)} Rework Entries` : "Save Rework Entry"), y && f.default.createElement("p", {
+            className: "text-center text-xs text-emerald-600 font-semibold"
+        }, y)), w.length > 0 && f.default.createElement("div", {
+            className: "rounded-2xl border border-stone-200 bg-white p-4"
+        }, f.default.createElement("h4", {
+            className: "text-xs font-bold text-stone-500 uppercase tracking-wide mb-2"
+        }, "Rework entries for ", lr(l)), f.default.createElement("div", {
+            className: "space-y-1.5"
+        }, w.map(O => f.default.createElement(zh, {
+            key: O.id,
+            editing: A === O.id,
+            label: `${O.hour?`${O.hour} \xB7 `:""}${O.reason||"Rework"}`,
+            value: `${O.qty} pcs`,
+            onEdit: () => I(O),
+            onDelete: () => {
+                A === O.id && S(), i(O.id)
+            }
+        })))))
+    }
     function UOe({
         styles: e,
         entries: t,
@@ -76806,53 +77064,19 @@ In order to be iterable, non-array objects must have a [Symbol.iterator]() metho
         }, u, ", ", c, "!"), f.default.createElement("p", {
             className: "text-teal-200/80 text-sm mt-0.5"
         }, "Here's what's happening with your production today.")), f.default.createElement("button", {
-            onClick: () => o("dashboard"),
+            onClick: () => {
+                o("dashboard");
+                setTimeout(() => {
+                    document.getElementById("live-production-section")?.scrollIntoView({
+                        behavior: "smooth",
+                        block: "start"
+                    })
+                }, 50)
+            },
             className: "inline-flex items-center gap-1.5 rounded-xl bg-white/15 hover:bg-white/25 border border-white/20 px-4 py-2 text-sm font-semibold shrink-0"
         }, "Live Dashboard ", f.default.createElement(Hs, {
             size: 15
         }))), f.default.createElement("div", {
-            className: "grid grid-cols-2 sm:grid-cols-4 gap-3"
-        }, f.default.createElement(Of, {
-            label: "Active Styles",
-            value: d,
-            icon: Ga,
-            color: "teal"
-        }), f.default.createElement(Of, {
-            label: "Buyers",
-            value: p,
-            icon: vB,
-            color: "emerald"
-        }), f.default.createElement(Of, {
-            label: "Cost Sheets",
-            value: n.length,
-            icon: kp,
-            color: "violet"
-        }), f.default.createElement(Of, {
-            label: "Lines",
-            value: a.length,
-            icon: Qn,
-            color: "amber"
-        }), f.default.createElement(Of, {
-            label: "Style Numbers",
-            value: t.length,
-            icon: xB,
-            color: "indigo"
-        }), f.default.createElement(Of, {
-            label: "Colours",
-            value: m,
-            icon: BB,
-            color: "pink"
-        }), f.default.createElement(Of, {
-            label: "Shipped Styles",
-            value: h,
-            icon: hl,
-            color: "sky"
-        }), f.default.createElement(Of, {
-            label: "Total Users",
-            value: s ? r.length : "\u2014",
-            icon: ou,
-            color: "stone"
-        })), f.default.createElement("div", {
             className: "rounded-2xl border border-stone-200 bg-white p-4"
         }, f.default.createElement("h4", {
             className: "text-xs font-bold text-stone-500 uppercase tracking-wide mb-3"
@@ -76863,18 +77087,22 @@ In order to be iterable, non-array objects must have a [Symbol.iterator]() metho
             label: "New Style",
             icon: Ga
         }, {
-            key: "cutting",
-            label: "Cutting Entry",
-            icon: Gs
-        }, {
             key: "production",
-            label: "Production Entry",
+            label: "Entry",
             icon: cs
+        }, {
+            key: "lineplan",
+            label: "Plan",
+            icon: Qn
         }, {
             key: "estimate",
             label: "New Estimate",
             icon: ss
-        }].map(g => f.default.createElement("button", {
+        }, s && {
+            key: "admin",
+            label: "User Create",
+            icon: ou
+        }].filter(Boolean).map(g => f.default.createElement("button", {
             key: g.key,
             onClick: () => o(g.key),
             className: "flex items-center gap-2 rounded-xl border border-stone-200 px-3 py-2.5 text-sm font-semibold text-stone-600 hover:border-amber-400 hover:text-amber-600 active:bg-stone-50 transition-colors"
@@ -76889,7 +77117,7 @@ In order to be iterable, non-array objects must have a [Symbol.iterator]() metho
         entries: r,
         linePlans: n
     }) {
-        let [a, i] = (0, f.useState)(dOe(vr(), -13)), [s, o] = (0, f.useState)(vr()), [l, u] = (0, f.useState)(t[0]?.id || ""), [c, d] = (0, f.useState)("all"), h = s || vr(), p = h === vr(), m = e.filter(L => L.status === "active"), g = (0, f.useMemo)(() => fOe(a, s), [a, s]), v = g.length;
+        let [a, i] = (0, f.useState)(dOe(vr(), -13)), [s, o] = (0, f.useState)(vr()), [l, u] = (0, f.useState)(t[0]?.id || ""), [c, d] = (0, f.useState)("all"), [fsProd, setFsProd] = (0, f.useState)(!1), [fsEff, setFsEff] = (0, f.useState)(!1), [fsQual, setFsQual] = (0, f.useState)(!1), [fsOT, setFsOT] = (0, f.useState)(!1), [fsDT, setFsDT] = (0, f.useState)(!1), [fsLive, setFsLive] = (0, f.useState)(!0), [trendLine, setTrendLine] = (0, f.useState)(""), [dtReason, setDtReason] = (0, f.useState)(""), [qReason, setQReason] = (0, f.useState)(""), h = s || vr(), p = h === vr(), m = e.filter(L => L.status === "active"), g = (0, f.useMemo)(() => fOe(a, s), [a, s]), v = g.length;
         (0, f.useEffect)(() => {
             !l && t[0] && u(t[0].id)
         }, [t]);
@@ -76902,6 +77130,8 @@ In order to be iterable, non-array objects must have a [Symbol.iterator]() metho
                 Actual: L.actual
             })) : [], [C]),
             k = (L, K) => r.filter(ae => ae.date === L && ae.type === K).reduce((ae, R) => ae + oe(R.qty), 0),
+            kLine = (L, Le2, K) => r.filter(ae => ae.date === L && ae.type === K && ae.lineId === Le2).reduce((ae, R) => ae + oe(R.qty), 0),
+            kReason = (L, K, rsn) => r.filter(ae => ae.date === L && ae.type === K && (!trendLine || ae.lineId === trendLine) && (!rsn || ae.reason === rsn)).reduce((ae, R) => ae + oe(R.qty), 0),
             E = (0, f.useMemo)(() => {
                 let L = k(h, "cutting"),
                     K = k(h, "sewing"),
@@ -76926,18 +77156,26 @@ In order to be iterable, non-array objects must have a [Symbol.iterator]() metho
             w = (0, f.useMemo)(() => g.map(L => ({
                 date: L,
                 label: lr(L),
-                Cutting: k(L, "cutting"),
-                Sewing: k(L, "sewing"),
-                Packing: k(L, "packing")
-            })), [r, g]),
+                Cutting: trendLine ? kLine(L, trendLine, "cutting") : k(L, "cutting"),
+                Sewing: trendLine ? kLine(L, trendLine, "sewing") : k(L, "sewing"),
+                Packing: trendLine ? kLine(L, trendLine, "packing") : k(L, "packing")
+            })), [r, g, trendLine]),
             I = (0, f.useMemo)(() => g.map(L => {
+                if (trendLine) {
+                    let pv = v3(trendLine, L, n, r);
+                    return {
+                        date: L,
+                        label: lr(L),
+                        Efficiency: pv.planQty > 0 ? Number((pv.actualQty / pv.planQty * 100).toFixed(1)) : 0
+                    }
+                }
                 let K = Sy(L, e, r);
                 return {
                     date: L,
                     label: lr(L),
                     Efficiency: Number(K.efficiencyPct.toFixed(1))
                 }
-            }), [r, e, g]),
+            }), [r, e, g, trendLine, n]),
             S = (0, f.useMemo)(() => t.map(L => {
                 let K = v3(L.id, h, n, r);
                 return {
@@ -76947,176 +77185,182 @@ In order to be iterable, non-array objects must have a [Symbol.iterator]() metho
                 }
             }), [t, n, r, h]),
             P = S.reduce((L, K) => L + K.Plan, 0),
-            D = S.reduce((L, K) => L + K.Actual, 0);
+            D = S.reduce((L, K) => L + K.Actual, 0),
+            perLine = (0, f.useMemo)(() => t.map(L => {
+                let st = Ff(L.id, e),
+                    wip = sgLineWip(L.id, r, h),
+                    out = kLine(h, L.id, "sewing"),
+                    rejEntries = r.filter(x2 => x2.lineId === L.id && x2.date === h && (x2.type === "cuttingReject" || x2.type === "sewingReject" || x2.type === "rework")),
+                    defects = rejEntries.reduce((s2, x2) => s2 + oe(x2.qty), 0),
+                    reasonMap = {};
+                rejEntries.forEach(x2 => {
+                    let key = x2.reason || "Other";
+                    reasonMap[key] = (reasonMap[key] || 0) + oe(x2.qty)
+                });
+                let topDefect = "-",
+                    topQty = 0;
+                Object.keys(reasonMap).forEach(kk => {
+                    if (reasonMap[kk] > topQty) topQty = reasonMap[kk], topDefect = kk
+                });
+                let lp = v3(L.id, h, n, r),
+                    eff = lp.planQty > 0 ? Number((lp.actualQty / lp.planQty * 100).toFixed(1)) : 0;
+                return {
+                    id: L.id,
+                    lineNo: L.lineNo || "Line",
+                    styleNo: st?.styleNo || "\u2014",
+                    sam: st?.sam || "",
+                    eff,
+                    cutSewWip: wip.cutSewWip,
+                    sewPackWip: wip.sewPackWip,
+                    output: out,
+                    defects,
+                    rft: out > 0 ? (out - defects) / out * 100 : 0,
+                    dhu: out > 0 ? defects / out * 100 : 0,
+                    topDefect,
+                    topQty
+                }
+            }), [t, e, r, h, n]),
+            Q = (0, f.useMemo)(() => g.map(L => {
+                let outQty = trendLine ? kLine(L, trendLine, "sewing") : k(L, "sewing"),
+                    rejEntries = r.filter(x2 => x2.date === L && (x2.type === "cuttingReject" || x2.type === "sewingReject" || x2.type === "rework") && (!trendLine || x2.lineId === trendLine) && (!qReason || x2.reason === qReason)),
+                    defQty = rejEntries.reduce((s2, x2) => s2 + oe(x2.qty), 0),
+                    rejOnlyQty = rejEntries.filter(x2 => x2.type === "cuttingReject" || x2.type === "sewingReject").reduce((s2, x2) => s2 + oe(x2.qty), 0),
+                    reasonMap = {};
+                rejEntries.forEach(x2 => {
+                    let key = x2.reason || "Other";
+                    reasonMap[key] = (reasonMap[key] || 0) + oe(x2.qty)
+                });
+                let topDefect = "-",
+                    topQty = 0;
+                Object.keys(reasonMap).forEach(kk => {
+                    if (reasonMap[kk] > topQty) topQty = reasonMap[kk], topDefect = kk
+                });
+                return {
+                    date: L,
+                    label: lr(L),
+                    output: outQty,
+                    Defects: defQty,
+                    DHU: outQty > 0 ? Number((defQty / outQty * 100).toFixed(1)) : 0,
+                    Rejection: rejOnlyQty,
+                    RejectionPct: outQty > 0 ? Number((rejOnlyQty / outQty * 100).toFixed(1)) : 0,
+                    topDefect,
+                    topQty
+                }
+            }), [r, g, trendLine, qReason]),
+            OD = (0, f.useMemo)(() => g.map(L => ({
+                date: L,
+                label: lr(L),
+                OT: Number(((trendLine ? kLine(L, trendLine, "ot") : k(L, "ot")) / 60).toFixed(1)),
+                Downtime: Number((kReason(L, "downtime", dtReason) / 60).toFixed(1))
+            })), [r, g, trendLine, dtReason]),
+            selLine = perLine.find(L => L.id === l),
+            hourlyQ = (0, f.useMemo)(() => !l ? [] : ug.map(hr => {
+                let outQty = r.filter(o => o.lineId === l && o.date === h && o.type === "sewing" && o.hour === hr).reduce((s2, o) => s2 + oe(o.qty), 0),
+                    defEntries = r.filter(o => o.lineId === l && o.date === h && o.hour === hr && (o.type === "cuttingReject" || o.type === "sewingReject" || o.type === "rework")),
+                    defQty = defEntries.reduce((s2, o) => s2 + oe(o.qty), 0),
+                    rMap = {};
+                defEntries.forEach(o => {
+                    let key = o.reason || "Other";
+                    rMap[key] = (rMap[key] || 0) + oe(o.qty)
+                });
+                let hrTop = "-",
+                    hrTopQty = 0;
+                Object.keys(rMap).forEach(kk => {
+                    if (rMap[kk] > hrTopQty) hrTopQty = rMap[kk], hrTop = kk
+                });
+                return {
+                    hour: hr,
+                    output: outQty,
+                    defects: defQty,
+                    dhu: outQty > 0 ? defQty / outQty * 100 : 0,
+                    topDefect: hrTop,
+                    topQty: hrTopQty
+                }
+            }), [r, l, h]),
+            hourlyTgt = A.length ? A[A.length - 1].Target : 0,
+            hourlyAct = A.length ? A[A.length - 1].Actual : 0,
+            gaugePct = (act, tgt) => tgt > 0 ? Math.min(100, Math.round(act / tgt * 100)) : 0;
         return f.default.createElement("div", {
-            className: "space-y-4 pb-16"
+            className: "space-y-4 pb-16",
+            id: "live-production-section"
         }, f.default.createElement("div", {
-            className: "rounded-2xl border border-stone-200 bg-white p-3 space-y-2.5"
+            className: "rounded-2xl border border-[#1c4553] bg-gradient-to-br from-[#123a4a] to-[#0f2a3a] p-3"
         }, f.default.createElement("div", {
-            className: "flex items-center justify-between gap-3"
+            className: "flex items-center justify-between gap-3 flex-wrap"
         }, f.default.createElement("h3", {
-            className: "text-sm font-bold text-stone-700 flex items-center gap-1.5"
+            className: "text-sm font-bold text-[#eaf6f6] flex items-center gap-1.5"
         }, f.default.createElement(_c, {
             size: 15,
-            className: "text-amber-600"
+            className: "text-[#ffb020]"
         }), " Live Production"), f.default.createElement("div", {
-            className: "flex gap-1"
-        }, !p && f.default.createElement("button", {
-            onClick: () => o(vr()),
-            className: "text-[11px] font-semibold rounded-lg px-2.5 py-1.5 bg-stone-100 text-stone-600 active:bg-stone-200"
-        }, "Today"))), f.default.createElement("div", {
-            className: "flex flex-wrap items-center gap-2"
-        }, f.default.createElement("label", {
-            className: "flex items-center gap-1.5 rounded-lg border border-stone-200 px-2.5 py-1.5"
-        }, f.default.createElement("span", {
-            className: "text-[10px] uppercase tracking-wider text-stone-400 font-semibold"
+            className: "flex items-center gap-2 flex-wrap"
+        }, f.default.createElement("select", {
+            value: l,
+            onChange: L => u(L.target.value),
+            className: "text-xs font-semibold rounded-lg px-2.5 py-1.5 border border-[#1c4553] bg-[#0f2a3a] text-[#1fd4c4] outline-none focus:border-[#1fd4c4]"
+        }, !t.length && f.default.createElement("option", {
+            value: ""
+        }, "No lines"), t.map(L => f.default.createElement("option", {
+            key: L.id,
+            value: L.id
+        }, L.lineNo || "Line"))), f.default.createElement("span", {
+            className: "text-[10px] text-[#6f97a0]"
         }, "From"), f.default.createElement("input", {
             type: "date",
             value: a,
             max: s,
             onChange: L => i(L.target.value),
-            className: "text-xs outline-none bg-transparent tabular-nums"
-        })), f.default.createElement(Hs, {
-            size: 13,
-            className: "text-stone-300"
-        }), f.default.createElement("label", {
-            className: "flex items-center gap-1.5 rounded-lg border border-stone-200 px-2.5 py-1.5"
-        }, f.default.createElement("span", {
-            className: "text-[10px] uppercase tracking-wider text-stone-400 font-semibold"
-        }, "To"), f.default.createElement("input", {
+            className: "text-xs outline-none bg-[#0f2a3a] border border-[#1c4553] rounded-lg px-2 py-1.5 text-[#eaf6f6]"
+        }), f.default.createElement("span", {
+            className: "text-[10px] text-[#6f97a0]"
+        }, "To"), !p && f.default.createElement("button", {
+            onClick: () => o(vr()),
+            className: "text-[11px] font-semibold rounded-lg px-2.5 py-1.5 bg-[#123a4a] text-[#9fc7c7] active:bg-[#1c4553] border border-[#1c4553]"
+        }, "Today"), f.default.createElement("input", {
             type: "date",
             value: s,
             min: a,
             max: vr(),
             onChange: L => o(L.target.value),
-            className: "text-xs outline-none bg-transparent tabular-nums"
-        })), f.default.createElement("span", {
-            className: "text-[11px] text-stone-400"
-        }, v, " day", v !== 1 ? "s" : "", " selected"))), f.default.createElement("div", {
-            className: "grid grid-cols-2 sm:grid-cols-4 gap-2.5"
-        }, f.default.createElement(_f, {
-            label: p ? "Cut Today" : "Cut on date",
-            value: E.cutting,
-            icon: Gs,
-            accent: "text-stone-700"
-        }), f.default.createElement(_f, {
-            label: p ? "Sewn Today" : "Sewn on date",
-            value: E.sewing,
-            icon: cs,
-            accent: "text-amber-600"
-        }), f.default.createElement(_f, {
-            label: p ? "Packed Today" : "Packed on date",
-            value: E.packing,
-            icon: su,
-            accent: "text-emerald-600"
-        }), f.default.createElement(_f, {
-            label: p ? "Rejects Today" : "Rejects on date",
-            value: E.rejects,
-            icon: Ln,
-            accent: E.rejects > 0 ? "text-red-600" : "text-stone-700"
-        }), f.default.createElement(_f, {
-            label: "Factory Efficiency",
-            value: `${E.efficiencyPct.toFixed(1)}%`,
-            icon: Kn,
-            accent: E.efficiencyPct >= 65 ? "text-emerald-600" : "text-amber-600"
-        }), f.default.createElement(_f, {
-            label: "WIP Cut\u2192Sew",
-            value: b.cutSew,
-            icon: Hs
-        }), f.default.createElement(_f, {
-            label: "WIP Sew\u2192Pack",
-            value: b.sewPack,
-            icon: Hs
-        }), f.default.createElement(_f, {
-            label: "Active Styles",
-            value: m.length,
-            icon: Ga
+            className: "text-xs outline-none bg-[#0f2a3a] border border-[#1c4553] rounded-lg px-2 py-1.5 text-[#eaf6f6]"
+        }), f.default.createElement("button", {
+            onClick: () => setFsLive(v => !v),
+            title: fsLive ? "Exit full screen" : "Full screen",
+            className: "text-[13px] leading-none rounded-lg px-2 py-1.5 bg-[#123a4a] text-[#9fc7c7] active:bg-[#1c4553] border border-[#1c4553] hover:border-[#1fd4c4]/60"
+        }, fsLive ? "\u2926" : "\u26F6")))), f.default.createElement("div", {
+            className: fsLive ? "fixed inset-0 z-50 overflow-auto bg-[#0a1f2b] p-4 space-y-3" : "space-y-3"
+        }, fsLive && f.default.createElement("div", {
+            className: "flex justify-end mb-1"
+        }, f.default.createElement("button", {
+            onClick: () => setFsLive(!1),
+            className: "text-xs font-semibold rounded-lg px-3 py-1.5 bg-[#123a4a] text-[#ffb020] border border-[#1c4553] hover:border-[#ffb020]"
+        }, "\u2715 Exit Full Screen")), f.default.createElement("div", {
+            className: "grid grid-cols-1 sm:grid-cols-2 gap-3"
+        }, f.default.createElement(zOe, {
+            title: "HOURLY OUTPUT",
+            subtitle: selLine ? `${x?.lineNo||""} \u2014 ${p?"latest hour":lr(h)}` : "Select a line",
+            target: hourlyTgt,
+            achieved: hourlyAct,
+            pct: gaugePct(hourlyAct, hourlyTgt)
+        }), f.default.createElement(zOe, {
+            title: "DAILY OUTPUT",
+            subtitle: p ? "All lines \u2014 Today" : `All lines \u2014 ${lr(h)}`,
+            target: P,
+            achieved: D,
+            pct: gaugePct(D, P)
         })), f.default.createElement("div", {
-            className: "rounded-2xl border border-stone-200 bg-white p-4"
+            className: "grid grid-cols-1 lg:grid-cols-[1.6fr_1fr] gap-3"
         }, f.default.createElement("div", {
-            className: "flex items-center justify-between mb-3"
-        }, f.default.createElement("h4", {
-            className: "flex items-center gap-1.5 text-xs font-bold text-stone-500 uppercase tracking-wider"
-        }, f.default.createElement(Qn, {
-            size: 13,
-            className: "text-amber-600"
-        }), " Sewing \u2014 ", p ? "Today" : lr(h), " vs Plan (line-wise)"), f.default.createElement("span", {
-            className: `text-xs font-bold tabular-nums ${D>=P?"text-emerald-600":"text-amber-600"}`
-        }, D, " / ", P, " pcs")), t.length === 0 ? f.default.createElement("p", {
-            className: "text-xs text-stone-400"
-        }, "Add factory lines and a daily plan under Line Plan to see this chart.") : f.default.createElement("div", {
-            className: "h-56 -ml-2"
-        }, f.default.createElement(ff, {
-            width: "100%",
-            height: "100%"
-        }, f.default.createElement(Ey, {
-            data: S,
-            margin: {
-                top: 4,
-                right: 8,
-                left: 0,
-                bottom: 0
-            }
-        }, f.default.createElement($u, {
-            strokeDasharray: "3 3",
-            stroke: "#e7e5e4",
-            vertical: !1
-        }), f.default.createElement(rc, {
-            dataKey: "name",
-            tick: {
-                fontSize: 11,
-                fill: "#78716c"
-            },
-            axisLine: {
-                stroke: "#e7e5e4"
-            },
-            tickLine: !1
-        }), f.default.createElement(ac, {
-            tick: {
-                fontSize: 11,
-                fill: "#78716c"
-            },
-            axisLine: !1,
-            tickLine: !1,
-            width: 32
-        }), f.default.createElement(Ef, {
-            contentStyle: {
-                fontSize: 12,
-                borderRadius: 8,
-                border: "1px solid #e7e5e4"
-            }
-        }), f.default.createElement(B0, {
-            wrapperStyle: {
-                fontSize: 11
-            }
-        }), f.default.createElement(Df, {
-            dataKey: "Plan",
-            fill: jh.plan,
-            radius: [4, 4, 0, 0]
-        }), f.default.createElement(Df, {
-            dataKey: "Actual",
-            fill: jh.actual,
-            radius: [4, 4, 0, 0]
-        }))))), f.default.createElement("div", {
-            className: "rounded-2xl border border-stone-200 bg-white p-4"
+            className: "rounded-2xl border border-[#1c4553] bg-gradient-to-br from-[#123a4a] to-[#0f2a3a] p-4"
         }, f.default.createElement("div", {
             className: "flex items-center justify-between gap-2 mb-3 flex-wrap"
         }, f.default.createElement("h4", {
-            className: "flex items-center gap-1.5 text-xs font-bold text-stone-500 uppercase tracking-wider"
+            className: "flex items-center gap-1.5 text-xs font-bold text-[#9fc7c7] uppercase tracking-wider"
         }, f.default.createElement(Kn, {
             size: 13,
-            className: "text-amber-600"
-        }), " Live Production Hours", p ? " \u2014 Today" : ` \u2014 ${lr(h)}`), f.default.createElement("select", {
-            value: l,
-            onChange: L => u(L.target.value),
-            className: "text-xs rounded-md border border-stone-200 px-2 py-1.5 outline-none focus:border-amber-500 bg-white"
-        }, f.default.createElement("option", {
-            value: ""
-        }, "Select Line"), t.map(L => f.default.createElement("option", {
-            key: L.id,
-            value: L.id
-        }, L.lineNo || "Line")))), l ? y ? f.default.createElement(f.default.Fragment, null, f.default.createElement("p", {
-            className: "text-[11px] text-stone-400 mb-2"
+            className: "text-[#ffb020]"
+        }), " Hourly Production", x ? ` \u2014 ${x.lineNo}` : "", p ? " \u2014 Today" : ` \u2014 ${lr(h)}`)), l ? y ? f.default.createElement(f.default.Fragment, null, f.default.createElement("p", {
+            className: "text-[11px] text-[#6f97a0] mb-2"
         }, y.styleNo || "Untitled", " \xB7 ", y.buyer), f.default.createElement("div", {
             className: "h-56 -ml-2"
         }, f.default.createElement(ff, {
@@ -77132,22 +77376,22 @@ In order to be iterable, non-array objects must have a [Symbol.iterator]() metho
             }
         }, f.default.createElement($u, {
             strokeDasharray: "3 3",
-            stroke: "#e7e5e4",
+            stroke: "#1c4553",
             vertical: !1
         }), f.default.createElement(rc, {
             dataKey: "label",
             tick: {
                 fontSize: 10,
-                fill: "#78716c"
+                fill: "#9fc7c7"
             },
             axisLine: {
-                stroke: "#e7e5e4"
+                stroke: "#1c4553"
             },
             tickLine: !1
         }), f.default.createElement(ac, {
             tick: {
                 fontSize: 11,
-                fill: "#78716c"
+                fill: "#9fc7c7"
             },
             axisLine: !1,
             tickLine: !1,
@@ -77156,47 +77400,155 @@ In order to be iterable, non-array objects must have a [Symbol.iterator]() metho
             contentStyle: {
                 fontSize: 12,
                 borderRadius: 8,
-                border: "1px solid #e7e5e4"
+                border: "1px solid #1c4553",
+                background: "#0f2a3a",
+                color: "#eaf6f6"
             }
         }), f.default.createElement(B0, {
             wrapperStyle: {
-                fontSize: 11
+                fontSize: 11,
+                color: "#9fc7c7"
             }
         }), f.default.createElement(Df, {
             dataKey: "Target",
-            fill: jh.plan,
+            fill: "#ff5a5a",
+            fillOpacity: 0.25,
             radius: [4, 4, 0, 0]
         }), f.default.createElement(Df, {
             dataKey: "Actual",
-            fill: jh.actual,
+            fill: "#1fd4c4",
             radius: [4, 4, 0, 0]
         })))), f.default.createElement("div", {
             className: "mt-2.5 grid grid-cols-2 gap-2.5"
         }, f.default.createElement(Je, {
             label: "Total Target so far",
             value: `${Le(C.totalTarget)} pcs`,
-            accent: "text-stone-700"
+            accent: "text-[#9fc7c7]"
         }), f.default.createElement(Je, {
             label: "Total Actual so far",
             value: `${Le(C.totalActual)} pcs`,
-            accent: C.totalActual >= C.totalTarget ? "text-emerald-600" : "text-red-600"
+            accent: C.totalActual >= C.totalTarget ? "text-[#31d68a]" : "text-[#ff5a5a]"
         }))) : f.default.createElement("p", {
-            className: "text-xs text-stone-400"
+            className: "text-xs text-[#6f97a0]"
         }, "No style is currently booked on this line (Order Book / Line Booking).") : f.default.createElement("p", {
-            className: "text-xs text-stone-400"
+            className: "text-xs text-[#6f97a0]"
         }, "Select a line to see hour-wise target vs actual production.")), f.default.createElement("div", {
-            className: "rounded-2xl border border-stone-200 bg-white p-4"
+            className: "flex flex-col gap-3"
         }, f.default.createElement("div", {
-            className: "flex items-center justify-between gap-2 mb-3 flex-wrap"
+            className: "rounded-2xl border border-[#1c4553] bg-gradient-to-br from-[#123a4a] to-[#0f2a3a] p-4"
         }, f.default.createElement("h4", {
-            className: "flex items-center gap-1.5 text-xs font-bold text-stone-500 uppercase tracking-wider"
+            className: "text-xs font-bold text-[#9fc7c7] uppercase tracking-wide mb-3"
+        }, "WIP"), f.default.createElement("div", {
+            className: "grid grid-cols-2 gap-2.5"
+        }, perLine.slice(0, 4).map(L => f.default.createElement("div", {
+            key: L.id,
+            className: "text-center py-2"
+        }, f.default.createElement("div", {
+            className: "text-[10px] text-[#6f97a0] uppercase tracking-wide mb-1"
+        }, L.lineNo), f.default.createElement("div", {
+            className: "text-lg font-extrabold text-[#eaf6f6]"
+        }, Le(L.cutSewWip + L.sewPackWip)))))), f.default.createElement("div", {
+            className: "rounded-2xl border border-[#1c4553] bg-gradient-to-br from-[#123a4a] to-[#0f2a3a] p-4"
+        }, f.default.createElement("div", {
+            className: "grid grid-cols-2 gap-2.5"
+        }, f.default.createElement("div", {
+            className: "text-center py-2"
+        }, f.default.createElement("div", {
+            className: "text-[10px] text-[#6f97a0] uppercase tracking-wide mb-1"
+        }, "Rejected"), f.default.createElement("div", {
+            className: "text-lg font-extrabold text-[#ff5a5a]"
+        }, Le(E.rejects))), f.default.createElement("div", {
+            className: "text-center py-2"
+        }, f.default.createElement("div", {
+            className: "text-[10px] text-[#6f97a0] uppercase tracking-wide mb-1"
+        }, "Passed"), f.default.createElement("div", {
+            className: "text-lg font-extrabold text-[#31d68a]"
+        }, Le(Math.max(E.sewing - E.rejects, 0)), f.default.createElement("small", {
+            className: "text-[#6f97a0] text-xs font-medium"
+        }, " / ", Le(E.sewing)))))), f.default.createElement("div", {
+            className: "rounded-2xl border border-[#1c4553] bg-gradient-to-br from-[#123a4a] to-[#0f2a3a] p-4"
+        }, f.default.createElement("h4", {
+            className: "text-xs font-bold text-[#9fc7c7] uppercase tracking-wide mb-3"
+        }, "Efficiency"), f.default.createElement("div", {
+            className: "grid grid-cols-2 gap-2.5"
+        }, perLine.slice(0, 4).map(L => f.default.createElement("div", {
+            key: L.id,
+            className: "text-center py-2"
+        }, f.default.createElement("div", {
+            className: "text-[10px] text-[#6f97a0] uppercase tracking-wide mb-1"
+        }, L.lineNo), f.default.createElement("div", {
+            className: `text-lg font-extrabold ${L.eff>=100?"text-[#31d68a]":L.eff>=75?"text-[#ffb020]":"text-[#ff5a5a]"}`
+        }, `${L.eff}%`))))))), f.default.createElement("div", {
+            className: "rounded-2xl border border-[#1c4553] bg-gradient-to-br from-[#123a4a] to-[#0f2a3a] p-4"
+        }, f.default.createElement("h4", {
+            className: "flex items-center gap-1.5 text-xs font-bold text-[#9fc7c7] uppercase tracking-wider mb-3"
+        }, f.default.createElement(Ln, {
+            size: 13,
+            className: "text-[#ffb020]"
+        }), " Quality \u2014 Defects Summary", p ? " (Today)" : ` (${lr(h)})`), f.default.createElement("div", {
+            className: "overflow-x-auto"
+        }, f.default.createElement("table", {
+            className: "w-full text-[13px] border-collapse"
+        }, f.default.createElement("thead", null, f.default.createElement("tr", null, ["Line / Style", "Output", "Defects", "DHU %", "Top Defect", "Qty"].map((L, idx) => f.default.createElement("th", {
+            key: L,
+            className: `text-left py-2 px-2.5 bg-[#0a3040] text-[#ffb020] font-bold text-xs ${idx>=4?"text-right":""}`
+        }, L)))), f.default.createElement("tbody", null, perLine.map((L, idx) => f.default.createElement("tr", {
+            key: L.id,
+            className: idx % 2 === 1 ? "bg-white/[.02]" : ""
+        }, f.default.createElement("td", {
+            className: "py-1.5 px-2.5 border-b border-[#1c4553] text-[#eaf6f6]"
+        }, L.lineNo, " \xB7 ", L.styleNo), f.default.createElement("td", {
+            className: "py-1.5 px-2.5 border-b border-[#1c4553] text-[#eaf6f6]"
+        }, Le(L.output)), f.default.createElement("td", {
+            className: "py-1.5 px-2.5 border-b border-[#1c4553] text-[#eaf6f6]"
+        }, Le(L.defects)), f.default.createElement("td", {
+            className: "py-1.5 px-2.5 border-b border-[#1c4553] text-[#eaf6f6]"
+        }, L.output ? `${L.dhu.toFixed(1)}%` : "-"), f.default.createElement("td", {
+            className: "py-1.5 px-2.5 border-b border-[#1c4553] text-[#eaf6f6]"
+        }, L.topDefect), f.default.createElement("td", {
+            className: "py-1.5 px-2.5 border-b border-[#1c4553] text-right text-[#eaf6f6]"
+        }, L.topQty || 0))))))), l && f.default.createElement("div", {
+            className: "rounded-2xl border border-[#1c4553] bg-gradient-to-br from-[#123a4a] to-[#0f2a3a] p-4"
+        }, f.default.createElement("h4", {
+            className: "flex items-center gap-1.5 text-xs font-bold text-[#9fc7c7] uppercase tracking-wider mb-3"
+        }, f.default.createElement(Ln, {
+            size: 13,
+            className: "text-[#ffb020]"
+        }), " Hour-wise Quality \u2014 ", x?.lineNo || "Line", p ? " \u2014 Today" : ` \u2014 ${lr(h)}`), f.default.createElement("div", {
+            className: "overflow-x-auto"
+        }, f.default.createElement("table", {
+            className: "w-full text-[13px] border-collapse"
+        }, f.default.createElement("thead", null, f.default.createElement("tr", null, ["Hour", "Output", "Defects", "DHU %", "Top Defect", "Qty"].map((L, idx) => f.default.createElement("th", {
+            key: L,
+            className: `text-left py-2 px-2.5 bg-[#0a3040] text-[#ffb020] font-bold text-xs ${idx>=5?"text-right":""}`
+        }, L)))), f.default.createElement("tbody", null, hourlyQ.map((L, idx) => f.default.createElement("tr", {
+            key: L.hour,
+            className: idx % 2 === 1 ? "bg-white/[.02]" : ""
+        }, f.default.createElement("td", {
+            className: "py-1.5 px-2.5 border-b border-[#1c4553] text-[#eaf6f6]"
+        }, L.hour), f.default.createElement("td", {
+            className: "py-1.5 px-2.5 border-b border-[#1c4553] text-[#eaf6f6]"
+        }, Le(L.output)), f.default.createElement("td", {
+            className: "py-1.5 px-2.5 border-b border-[#1c4553] text-[#eaf6f6]"
+        }, Le(L.defects)), f.default.createElement("td", {
+            className: `py-1.5 px-2.5 border-b border-[#1c4553] font-bold ${L.output===0?"text-[#6f97a0]":L.dhu<=5?"text-[#31d68a]":"text-[#ff5a5a]"}`
+        }, L.output || L.defects ? `${L.dhu.toFixed(1)}%` : "-"), f.default.createElement("td", {
+            className: "py-1.5 px-2.5 border-b border-[#1c4553] text-[#eaf6f6]"
+        }, L.topDefect), f.default.createElement("td", {
+            className: "py-1.5 px-2.5 border-b border-[#1c4553] text-right text-[#eaf6f6]"
+        }, L.topQty || 0)))))))), f.default.createElement("div", {
+            className: `rounded-2xl border border-[#1c4553] bg-gradient-to-br from-[#123a4a] to-[#0f2a3a] p-4 ${fsProd?"fixed inset-0 z-50 overflow-auto":""}`
+        }, f.default.createElement("h4", {
+            className: "flex items-center gap-1.5 text-xs font-bold text-[#9fc7c7] uppercase tracking-wider mb-2"
         }, f.default.createElement(sa, {
             size: 13,
-            className: "text-amber-600"
-        }), " Production Trend \u2014 ", lr(a), " to ", lr(s)), f.default.createElement("select", {
+            className: "text-[#ffb020]"
+        }), " Production Trend \u2014 ", lr(a), " to ", lr(s)), f.default.createElement("div", {
+            className: "flex items-center justify-between gap-2 mb-3 flex-wrap"
+        }, f.default.createElement("select", {
             value: c,
             onChange: L => d(L.target.value),
-            className: "text-xs rounded-md border border-stone-200 px-2 py-1.5 outline-none focus:border-amber-500 bg-white"
+            className: "text-xs rounded-md border border-[#1c4553] px-2 py-1.5 outline-none focus:border-[#1fd4c4] bg-[#0f2a3a] text-[#eaf6f6]"
         }, f.default.createElement("option", {
             value: "all"
         }, "All (Cutting + Sewing + Packing)"), f.default.createElement("option", {
@@ -77205,8 +77557,40 @@ In order to be iterable, non-array objects must have a [Symbol.iterator]() metho
             value: "sewing"
         }, "Sewing only"), f.default.createElement("option", {
             value: "packing"
-        }, "Packing only"))), f.default.createElement("div", {
-            className: "h-60 -ml-2"
+        }, "Packing only")), f.default.createElement("select", {
+            value: trendLine,
+            onChange: L => setTrendLine(L.target.value),
+            className: "text-xs rounded-md border border-[#1c4553] px-2 py-1.5 outline-none focus:border-[#1fd4c4] bg-[#0f2a3a] text-[#eaf6f6]"
+        }, f.default.createElement("option", {
+            value: ""
+        }, "All Lines"), t.map(L => f.default.createElement("option", {
+            key: L.id,
+            value: L.id
+        }, L.lineNo || "Line"))), f.default.createElement("div", {
+            className: "flex items-center gap-1 flex-wrap"
+        }, f.default.createElement("span", {
+            className: "text-[10px] text-[#6f97a0]"
+        }, "From"), f.default.createElement("input", {
+            type: "date",
+            value: a,
+            max: s,
+            onChange: L => i(L.target.value),
+            className: "text-[11px] outline-none bg-[#0f2a3a] border border-[#1c4553] rounded-lg px-1.5 py-1 text-[#eaf6f6]"
+        }), f.default.createElement("span", {
+            className: "text-[10px] text-[#6f97a0]"
+        }, "To"), f.default.createElement("input", {
+            type: "date",
+            value: s,
+            min: a,
+            max: vr(),
+            onChange: L => o(L.target.value),
+            className: "text-[11px] outline-none bg-[#0f2a3a] border border-[#1c4553] rounded-lg px-1.5 py-1 text-[#eaf6f6]"
+        }), f.default.createElement("button", {
+            onClick: () => setFsProd(v => !v),
+            title: fsProd ? "Exit full screen" : "Full screen",
+            className: "text-[13px] leading-none rounded-lg px-2 py-1.5 bg-[#123a4a] text-[#9fc7c7] active:bg-[#1c4553] border border-[#1c4553] hover:border-[#1fd4c4]/60"
+        }, fsProd ? "\u2926" : "\u26F6"))), f.default.createElement("div", {
+            className: fsProd ? "h-[70vh] -ml-2" : "h-60 -ml-2"
         }, f.default.createElement(ff, {
             width: "100%",
             height: "100%"
@@ -77220,23 +77604,23 @@ In order to be iterable, non-array objects must have a [Symbol.iterator]() metho
             }
         }, f.default.createElement($u, {
             strokeDasharray: "3 3",
-            stroke: "#e7e5e4",
+            stroke: "#1c4553",
             vertical: !1
         }), f.default.createElement(rc, {
             dataKey: "label",
             tick: {
                 fontSize: 10,
-                fill: "#78716c"
+                fill: "#9fc7c7"
             },
             axisLine: {
-                stroke: "#e7e5e4"
+                stroke: "#1c4553"
             },
             tickLine: !1,
             interval: v > 14 ? Math.ceil(v / 10) : 0
         }), f.default.createElement(ac, {
             tick: {
                 fontSize: 11,
-                fill: "#78716c"
+                fill: "#9fc7c7"
             },
             axisLine: !1,
             tickLine: !1,
@@ -77245,11 +77629,14 @@ In order to be iterable, non-array objects must have a [Symbol.iterator]() metho
             contentStyle: {
                 fontSize: 12,
                 borderRadius: 8,
-                border: "1px solid #e7e5e4"
+                border: "1px solid #1c4553",
+                background: "#0f2a3a",
+                color: "#eaf6f6"
             }
         }), f.default.createElement(B0, {
             wrapperStyle: {
-                fontSize: 11
+                fontSize: 11,
+                color: "#9fc7c7"
             }
         }), (c === "all" || c === "cutting") && f.default.createElement(If, {
             type: "monotone",
@@ -77270,14 +77657,46 @@ In order to be iterable, non-array objects must have a [Symbol.iterator]() metho
             strokeWidth: 2,
             dot: !1
         }))))), f.default.createElement("div", {
-            className: "rounded-2xl border border-stone-200 bg-white p-4"
+            className: `rounded-2xl border border-[#1c4553] bg-gradient-to-br from-[#123a4a] to-[#0f2a3a] p-4 ${fsEff?"fixed inset-0 z-50 overflow-auto":""}`
         }, f.default.createElement("h4", {
-            className: "flex items-center gap-1.5 text-xs font-bold text-stone-500 uppercase tracking-wider mb-3"
+            className: "flex items-center gap-1.5 text-xs font-bold text-[#9fc7c7] uppercase tracking-wider mb-2"
         }, f.default.createElement(Kn, {
             size: 13,
-            className: "text-amber-600"
+            className: "text-[#ffb020]"
         }), " Factory Efficiency Trend \u2014 ", lr(a), " to ", lr(s)), f.default.createElement("div", {
-            className: "h-48 -ml-2"
+            className: "flex items-center justify-end gap-1 flex-wrap mb-3"
+        }, f.default.createElement("select", {
+            value: trendLine,
+            onChange: L => setTrendLine(L.target.value),
+            className: "text-[11px] rounded-lg border border-[#1c4553] px-1.5 py-1 outline-none focus:border-[#1fd4c4] bg-[#0f2a3a] text-[#eaf6f6]"
+        }, f.default.createElement("option", {
+            value: ""
+        }, "All Lines"), t.map(L => f.default.createElement("option", {
+            key: L.id,
+            value: L.id
+        }, L.lineNo || "Line"))), f.default.createElement("span", {
+            className: "text-[10px] text-[#6f97a0]"
+        }, "From"), f.default.createElement("input", {
+            type: "date",
+            value: a,
+            max: s,
+            onChange: L => i(L.target.value),
+            className: "text-[11px] outline-none bg-[#0f2a3a] border border-[#1c4553] rounded-lg px-1.5 py-1 text-[#eaf6f6]"
+        }), f.default.createElement("span", {
+            className: "text-[10px] text-[#6f97a0]"
+        }, "To"), f.default.createElement("input", {
+            type: "date",
+            value: s,
+            min: a,
+            max: vr(),
+            onChange: L => o(L.target.value),
+            className: "text-[11px] outline-none bg-[#0f2a3a] border border-[#1c4553] rounded-lg px-1.5 py-1 text-[#eaf6f6]"
+        }), f.default.createElement("button", {
+            onClick: () => setFsEff(v => !v),
+            title: fsEff ? "Exit full screen" : "Full screen",
+            className: "text-[13px] leading-none rounded-lg px-2 py-1.5 bg-[#123a4a] text-[#9fc7c7] active:bg-[#1c4553] border border-[#1c4553] hover:border-[#1fd4c4]/60"
+        }, fsEff ? "\u2926" : "\u26F6")), f.default.createElement("div", {
+            className: fsEff ? "h-[70vh] -ml-2" : "h-48 -ml-2"
         }, f.default.createElement(ff, {
             width: "100%",
             height: "100%"
@@ -77291,23 +77710,23 @@ In order to be iterable, non-array objects must have a [Symbol.iterator]() metho
             }
         }, f.default.createElement($u, {
             strokeDasharray: "3 3",
-            stroke: "#e7e5e4",
+            stroke: "#1c4553",
             vertical: !1
         }), f.default.createElement(rc, {
             dataKey: "label",
             tick: {
                 fontSize: 10,
-                fill: "#78716c"
+                fill: "#9fc7c7"
             },
             axisLine: {
-                stroke: "#e7e5e4"
+                stroke: "#1c4553"
             },
             tickLine: !1,
             interval: v > 14 ? Math.ceil(v / 10) : 0
         }), f.default.createElement(ac, {
             tick: {
                 fontSize: 11,
-                fill: "#78716c"
+                fill: "#9fc7c7"
             },
             axisLine: !1,
             tickLine: !1,
@@ -77317,19 +77736,422 @@ In order to be iterable, non-array objects must have a [Symbol.iterator]() metho
             contentStyle: {
                 fontSize: 12,
                 borderRadius: 8,
-                border: "1px solid #e7e5e4"
+                border: "1px solid #1c4553",
+                background: "#0f2a3a",
+                color: "#eaf6f6"
             }
         }), f.default.createElement(If, {
             type: "monotone",
             dataKey: "Efficiency",
-            stroke: "#f59e0b",
+            stroke: "#ffb020",
             strokeWidth: 2,
             dot: {
                 r: 2
             }
-        }))))))
-    }
+        }))))), f.default.createElement("div", {
+            className: `rounded-2xl border border-[#1c4553] bg-gradient-to-br from-[#123a4a] to-[#0f2a3a] p-4 ${fsQual?"fixed inset-0 z-50 overflow-auto":""}`
+        }, f.default.createElement("h4", {
+            className: "flex items-center gap-1.5 text-xs font-bold text-[#9fc7c7] uppercase tracking-wider mb-2"
+        }, f.default.createElement(Ln, {
+            size: 13,
+            className: "text-[#ffb020]"
+        }), " Quality Trend \u2014 ", lr(a), " to ", lr(s)), f.default.createElement("div", {
+            className: "flex items-center justify-end gap-1 flex-wrap mb-3"
+        }, f.default.createElement("select", {
+            value: trendLine,
+            onChange: L => setTrendLine(L.target.value),
+            className: "text-[11px] rounded-lg border border-[#1c4553] px-1.5 py-1 outline-none focus:border-[#1fd4c4] bg-[#0f2a3a] text-[#eaf6f6]"
+        }, f.default.createElement("option", {
+            value: ""
+        }, "All Lines"), t.map(L => f.default.createElement("option", {
+            key: L.id,
+            value: L.id
+        }, L.lineNo || "Line"))), f.default.createElement("select", {
+            value: qReason,
+            onChange: L => setQReason(L.target.value),
+            className: "text-[11px] rounded-lg border border-[#1c4553] px-1.5 py-1 outline-none focus:border-[#1fd4c4] bg-[#0f2a3a] text-[#eaf6f6]"
+        }, f.default.createElement("option", {
+            value: ""
+        }, "All Reasons"), [...new Set([...s3, ...o3])].map(rsn => f.default.createElement("option", {
+            key: rsn,
+            value: rsn
+        }, rsn))), f.default.createElement("span", {
+            className: "text-[10px] text-[#6f97a0]"
+        }, "From"), f.default.createElement("input", {
+            type: "date",
+            value: a,
+            max: s,
+            onChange: L => i(L.target.value),
+            className: "text-[11px] outline-none bg-[#0f2a3a] border border-[#1c4553] rounded-lg px-1.5 py-1 text-[#eaf6f6]"
+        }), f.default.createElement("span", {
+            className: "text-[10px] text-[#6f97a0]"
+        }, "To"), f.default.createElement("input", {
+            type: "date",
+            value: s,
+            min: a,
+            max: vr(),
+            onChange: L => o(L.target.value),
+            className: "text-[11px] outline-none bg-[#0f2a3a] border border-[#1c4553] rounded-lg px-1.5 py-1 text-[#eaf6f6]"
+        }), f.default.createElement("button", {
+            onClick: () => setFsQual(v => !v),
+            title: fsQual ? "Exit full screen" : "Full screen",
+            className: "text-[13px] leading-none rounded-lg px-2 py-1.5 bg-[#123a4a] text-[#9fc7c7] active:bg-[#1c4553] border border-[#1c4553] hover:border-[#1fd4c4]/60"
+        }, fsQual ? "\u2926" : "\u26F6")), f.default.createElement("div", {
+            className: fsQual ? "h-[70vh] -ml-2" : "h-48 -ml-2"
+        }, f.default.createElement(ff, {
+            width: "100%",
+            height: "100%"
+        }, f.default.createElement(by, {
+            data: Q,
+            margin: {
+                top: 4,
+                right: 8,
+                left: 0,
+                bottom: 0
+            }
+        }, f.default.createElement($u, {
+            strokeDasharray: "3 3",
+            stroke: "#1c4553",
+            vertical: !1
+        }), f.default.createElement(rc, {
+            dataKey: "label",
+            tick: {
+                fontSize: 10,
+                fill: "#9fc7c7"
+            },
+            axisLine: {
+                stroke: "#1c4553"
+            },
+            tickLine: !1,
+            interval: v > 14 ? Math.ceil(v / 10) : 0
+        }), f.default.createElement(ac, {
+            tick: {
+                fontSize: 11,
+                fill: "#9fc7c7"
+            },
+            axisLine: !1,
+            tickLine: !1,
+            width: 36,
+            unit: "%"
+        }), f.default.createElement(Ef, {
+            contentStyle: {
+                fontSize: 12,
+                borderRadius: 8,
+                border: "1px solid #1c4553",
+                background: "#0f2a3a",
+                color: "#eaf6f6"
+            }
+        }), f.default.createElement(B0, {
+            wrapperStyle: {
+                fontSize: 11,
+                color: "#9fc7c7"
+            }
+        }), f.default.createElement(If, {
+            type: "monotone",
+            dataKey: "DHU",
+            stroke: "#ff5a5a",
+            strokeWidth: 2,
+            dot: {
+                r: 2
+            },
+            name: "DHU %"
+        }), f.default.createElement(If, {
+            type: "monotone",
+            dataKey: "RejectionPct",
+            stroke: "#ff8c42",
+            strokeWidth: 2,
+            dot: {
+                r: 2
+            },
+            name: "Rejection %"
+        })))), f.default.createElement("div", {
+            className: "overflow-x-auto mt-3"
+        }, f.default.createElement("table", {
+            className: "w-full text-[12px] border-collapse"
+        }, f.default.createElement("thead", null, f.default.createElement("tr", null, ["Date", "Output", "Defects", "DHU %", "Rejection %", "Top Defect", "Qty"].map((L, idx) => f.default.createElement("th", {
+            key: L,
+            className: `text-left py-1.5 px-2 bg-[#0a3040] text-[#ffb020] font-bold text-[11px] ${idx>=5?"text-right":""}`
+        }, L)))), f.default.createElement("tbody", null, Q.map((L, idx) => f.default.createElement("tr", {
+            key: L.date,
+            className: idx % 2 === 1 ? "bg-white/[.02]" : ""
+        }, f.default.createElement("td", {
+            className: "py-1 px-2 border-b border-[#1c4553] text-[#eaf6f6]"
+        }, L.label), f.default.createElement("td", {
+            className: "py-1 px-2 border-b border-[#1c4553] text-[#eaf6f6]"
+        }, Le(L.output)), f.default.createElement("td", {
+            className: "py-1 px-2 border-b border-[#1c4553] text-[#eaf6f6]"
+        }, Le(L.Defects)), f.default.createElement("td", {
+            className: `py-1 px-2 border-b border-[#1c4553] font-bold ${L.output===0?"text-[#6f97a0]":L.DHU<=5?"text-[#31d68a]":"text-[#ff5a5a]"}`
+        }, L.output ? `${L.DHU}%` : "-"), f.default.createElement("td", {
+            className: `py-1 px-2 border-b border-[#1c4553] font-bold ${L.output===0?"text-[#6f97a0]":L.RejectionPct<=3?"text-[#31d68a]":"text-[#ff8c42]"}`
+        }, L.output ? `${L.RejectionPct}%` : "-"), f.default.createElement("td", {
+            className: "py-1 px-2 border-b border-[#1c4553] text-[#eaf6f6]"
+        }, L.topDefect), f.default.createElement("td", {
+            className: "py-1 px-2 border-b border-[#1c4553] text-right text-[#eaf6f6]"
+        }, L.topQty || 0))))))), f.default.createElement("div", {
+            className: `rounded-2xl border border-[#1c4553] bg-gradient-to-br from-[#123a4a] to-[#0f2a3a] p-4 ${fsOT?"fixed inset-0 z-50 overflow-auto":""}`
+        }, f.default.createElement("h4", {
+            className: "flex items-center gap-1.5 text-xs font-bold text-[#9fc7c7] uppercase tracking-wider mb-2"
+        }, f.default.createElement(Kn, {
+            size: 13,
+            className: "text-[#ffb020]"
+        }), " OT Trend \u2014 ", lr(a), " to ", lr(s)), f.default.createElement("div", {
+            className: "flex items-center justify-end gap-1 flex-wrap mb-3"
+        }, f.default.createElement("select", {
+            value: trendLine,
+            onChange: L => setTrendLine(L.target.value),
+            className: "text-[11px] rounded-lg border border-[#1c4553] px-1.5 py-1 outline-none focus:border-[#1fd4c4] bg-[#0f2a3a] text-[#eaf6f6]"
+        }, f.default.createElement("option", {
+            value: ""
+        }, "All Lines"), t.map(L => f.default.createElement("option", {
+            key: L.id,
+            value: L.id
+        }, L.lineNo || "Line"))), f.default.createElement("span", {
+            className: "text-[10px] text-[#6f97a0]"
+        }, "From"), f.default.createElement("input", {
+            type: "date",
+            value: a,
+            max: s,
+            onChange: L => i(L.target.value),
+            className: "text-[11px] outline-none bg-[#0f2a3a] border border-[#1c4553] rounded-lg px-1.5 py-1 text-[#eaf6f6]"
+        }), f.default.createElement("span", {
+            className: "text-[10px] text-[#6f97a0]"
+        }, "To"), f.default.createElement("input", {
+            type: "date",
+            value: s,
+            min: a,
+            max: vr(),
+            onChange: L => o(L.target.value),
+            className: "text-[11px] outline-none bg-[#0f2a3a] border border-[#1c4553] rounded-lg px-1.5 py-1 text-[#eaf6f6]"
+        }), f.default.createElement("button", {
+            onClick: () => setFsOT(v => !v),
+            title: fsOT ? "Exit full screen" : "Full screen",
+            className: "text-[13px] leading-none rounded-lg px-2 py-1.5 bg-[#123a4a] text-[#9fc7c7] active:bg-[#1c4553] border border-[#1c4553] hover:border-[#1fd4c4]/60"
+        }, fsOT ? "\u2926" : "\u26F6")), f.default.createElement("div", {
+            className: fsOT ? "h-[70vh] -ml-2" : "h-48 -ml-2"
+        }, f.default.createElement(ff, {
+            width: "100%",
+            height: "100%"
+        }, f.default.createElement(by, {
+            data: OD,
+            margin: {
+                top: 4,
+                right: 8,
+                left: 0,
+                bottom: 0
+            }
+        }, f.default.createElement($u, {
+            strokeDasharray: "3 3",
+            stroke: "#1c4553",
+            vertical: !1
+        }), f.default.createElement(rc, {
+            dataKey: "label",
+            tick: {
+                fontSize: 10,
+                fill: "#9fc7c7"
+            },
+            axisLine: {
+                stroke: "#1c4553"
+            },
+            tickLine: !1,
+            interval: v > 14 ? Math.ceil(v / 10) : 0
+        }), f.default.createElement(ac, {
+            tick: {
+                fontSize: 11,
+                fill: "#9fc7c7"
+            },
+            axisLine: !1,
+            tickLine: !1,
+            width: 36,
+            unit: "h"
+        }), f.default.createElement(Ef, {
+            contentStyle: {
+                fontSize: 12,
+                borderRadius: 8,
+                border: "1px solid #1c4553",
+                background: "#0f2a3a",
+                color: "#eaf6f6"
+            }
+        }), f.default.createElement(If, {
+            type: "monotone",
+            dataKey: "OT",
+            stroke: "#ffb020",
+            strokeWidth: 2,
+            dot: {
+                r: 2
+            },
+            name: "OT (man-hrs)"
+        }))))), f.default.createElement("div", {
+            className: `rounded-2xl border border-[#1c4553] bg-gradient-to-br from-[#123a4a] to-[#0f2a3a] p-4 ${fsDT?"fixed inset-0 z-50 overflow-auto":""}`
+        }, f.default.createElement("h4", {
+            className: "flex items-center gap-1.5 text-xs font-bold text-[#9fc7c7] uppercase tracking-wider mb-2"
+        }, f.default.createElement(Oo, {
+            size: 13,
+            className: "text-[#ff5a5a]"
+        }), " Downtime Trend \u2014 ", lr(a), " to ", lr(s)), f.default.createElement("div", {
+            className: "flex items-center justify-end gap-1 flex-wrap mb-3"
+        }, f.default.createElement("select", {
+            value: trendLine,
+            onChange: L => setTrendLine(L.target.value),
+            className: "text-[11px] rounded-lg border border-[#1c4553] px-1.5 py-1 outline-none focus:border-[#1fd4c4] bg-[#0f2a3a] text-[#eaf6f6]"
+        }, f.default.createElement("option", {
+            value: ""
+        }, "All Lines"), t.map(L => f.default.createElement("option", {
+            key: L.id,
+            value: L.id
+        }, L.lineNo || "Line"))), f.default.createElement("select", {
+            value: dtReason,
+            onChange: L => setDtReason(L.target.value),
+            className: "text-[11px] rounded-lg border border-[#1c4553] px-1.5 py-1 outline-none focus:border-[#1fd4c4] bg-[#0f2a3a] text-[#eaf6f6]"
+        }, f.default.createElement("option", {
+            value: ""
+        }, "All Reasons"), l3.map(rsn => f.default.createElement("option", {
+            key: rsn,
+            value: rsn
+        }, rsn))), f.default.createElement("span", {
+            className: "text-[10px] text-[#6f97a0]"
+        }, "From"), f.default.createElement("input", {
+            type: "date",
+            value: a,
+            max: s,
+            onChange: L => i(L.target.value),
+            className: "text-[11px] outline-none bg-[#0f2a3a] border border-[#1c4553] rounded-lg px-1.5 py-1 text-[#eaf6f6]"
+        }), f.default.createElement("span", {
+            className: "text-[10px] text-[#6f97a0]"
+        }, "To"), f.default.createElement("input", {
+            type: "date",
+            value: s,
+            min: a,
+            max: vr(),
+            onChange: L => o(L.target.value),
+            className: "text-[11px] outline-none bg-[#0f2a3a] border border-[#1c4553] rounded-lg px-1.5 py-1 text-[#eaf6f6]"
+        }), f.default.createElement("button", {
+            onClick: () => setFsDT(v => !v),
+            title: fsDT ? "Exit full screen" : "Full screen",
+            className: "text-[13px] leading-none rounded-lg px-2 py-1.5 bg-[#123a4a] text-[#9fc7c7] active:bg-[#1c4553] border border-[#1c4553] hover:border-[#1fd4c4]/60"
+        }, fsDT ? "\u2926" : "\u26F6")), f.default.createElement("div", {
+            className: fsDT ? "h-[70vh] -ml-2" : "h-48 -ml-2"
+        }, f.default.createElement(ff, {
+            width: "100%",
+            height: "100%"
+        }, f.default.createElement(by, {
+            data: OD,
+            margin: {
+                top: 4,
+                right: 8,
+                left: 0,
+                bottom: 0
+            }
+        }, f.default.createElement($u, {
+            strokeDasharray: "3 3",
+            stroke: "#1c4553",
+            vertical: !1
+        }), f.default.createElement(rc, {
+            dataKey: "label",
+            tick: {
+                fontSize: 10,
+                fill: "#9fc7c7"
+            },
+            axisLine: {
+                stroke: "#1c4553"
+            },
+            tickLine: !1,
+            interval: v > 14 ? Math.ceil(v / 10) : 0
+        }), f.default.createElement(ac, {
+            tick: {
+                fontSize: 11,
+                fill: "#9fc7c7"
+            },
+            axisLine: !1,
+            tickLine: !1,
+            width: 36,
+            unit: "h"
+        }), f.default.createElement(Ef, {
+            contentStyle: {
+                fontSize: 12,
+                borderRadius: 8,
+                border: "1px solid #1c4553",
+                background: "#0f2a3a",
+                color: "#eaf6f6"
+            }
+        }), f.default.createElement(If, {
+            type: "monotone",
+            dataKey: "Downtime",
+            stroke: "#ff5a5a",
+            strokeWidth: 2,
+            dot: {
+                r: 2
+            },
+            name: "Downtime (hrs)"
+        }))))))    }
 
+    function zOe({
+        title: e,
+        subtitle: t,
+        target: r,
+        achieved: n,
+        pct: a
+    }) {
+        let R = 32,
+            C2 = 2 * Math.PI * R,
+            off = C2 - C2 * Math.min(100, Math.max(0, a)) / 100;
+        return f.default.createElement("div", {
+            className: "rounded-2xl border border-[#1c4553] bg-gradient-to-br from-[#123a4a] to-[#0f2a3a] p-4"
+        }, f.default.createElement("div", {
+            className: "flex items-center justify-between mb-1"
+        }, f.default.createElement("h3", {
+            className: "text-xs font-bold text-[#9fc7c7] uppercase tracking-wide"
+        }, e), f.default.createElement("span", {
+            className: "text-[10px] text-[#6f97a0]"
+        }, t)), f.default.createElement("div", {
+            className: "flex items-center gap-4 mt-2"
+        }, f.default.createElement("div", {
+            className: "flex-1"
+        }, f.default.createElement("div", {
+            className: "text-[11px] text-[#6f97a0]"
+        }, "Target"), f.default.createElement("div", {
+            className: "text-2xl font-extrabold text-[#9fc7c7]"
+        }, Le(r))), f.default.createElement("div", {
+            className: "flex-1"
+        }, f.default.createElement("div", {
+            className: "text-[11px] text-[#6f97a0]"
+        }, "Achieved"), f.default.createElement("div", {
+            className: "text-2xl font-extrabold text-[#1fd4c4]"
+        }, Le(n))), f.default.createElement("div", {
+            className: "relative",
+            style: {
+                width: 78,
+                height: 78,
+                flexShrink: 0
+            }
+        }, f.default.createElement("svg", {
+            width: 78,
+            height: 78,
+            viewBox: "0 0 78 78",
+            style: {
+                transform: "rotate(-90deg)"
+            }
+        }, f.default.createElement("circle", {
+            cx: 39,
+            cy: 39,
+            r: R,
+            stroke: "#1c4553",
+            strokeWidth: 9,
+            fill: "none"
+        }), f.default.createElement("circle", {
+            cx: 39,
+            cy: 39,
+            r: R,
+            stroke: "#ffb020",
+            strokeWidth: 9,
+            fill: "none",
+            strokeDasharray: C2,
+            strokeDashoffset: off,
+            strokeLinecap: "round"
+        })), f.default.createElement("div", {
+            className: "absolute inset-0 flex items-center justify-center text-sm font-extrabold text-[#ffb020]"
+        }, a, "%"))))
+    }
     function KOe({
         style: e,
         entries: t,
@@ -81580,21 +82402,17 @@ Floor note: "${g.trim()}"`,
                 label: "Cutting Entry",
                 icon: Gs
             }, {
-                key: "production",
-                label: "Production Entry",
-                icon: cs
-            }, {
                 key: "feeding",
                 label: "Feeding Entry",
                 icon: Qn
             }, {
-                key: "downtime",
-                label: "Downtime Entry",
-                icon: Oo
+                key: "production",
+                label: "Production Entry",
+                icon: cs
             }, {
-                key: "ot",
-                label: "OT Entry",
-                icon: Kn
+                key: "rework",
+                label: "Rework Entry",
+                icon: Ln
             }, {
                 key: "rejection",
                 label: "Rejection Entry",
@@ -81603,6 +82421,14 @@ Floor note: "${g.trim()}"`,
                 key: "packing",
                 label: "Packing Entry",
                 icon: su
+            }, {
+                key: "ot",
+                label: "OT Entry",
+                icon: Kn
+            }, {
+                key: "downtime",
+                label: "Downtime Entry",
+                icon: Oo
             }, {
                 key: "fabric",
                 label: "Fabric",
@@ -81690,7 +82516,7 @@ Floor note: "${g.trim()}"`,
                 key: "prod",
                 label: "Entry",
                 icon: cs,
-                tabs: ["cutting", "production", "feeding", "downtime", "ot", "rejection", "packing"]
+                tabs: ["cutting", "feeding", "production", "rework", "rejection", "packing", "ot", "downtime"]
             }, {
                 key: "fabric",
                 label: "Fabric Tracking",
@@ -82091,6 +82917,13 @@ Floor note: "${g.trim()}"`,
             onUpdate: yr,
             onDelete: Ca
         }), w === "rejection" && f.default.createElement(VOe, {
+            styles: F.filter(ne => ne.status === "active"),
+            entries: $e,
+            lines: Me,
+            onAdd: zt,
+            onUpdate: yr,
+            onDelete: Ca
+        }), w === "rework" && f.default.createElement(sgReworkEntry, {
             styles: F.filter(ne => ne.status === "active"),
             entries: $e,
             lines: Me,
