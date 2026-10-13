@@ -78645,6 +78645,1073 @@ In order to be iterable, non-array objects must have a [Symbol.iterator]() metho
         }))
     }
 
+    /* ===== SGPS Daily Efficiency Report (Plan vs Actual) ===== */
+    const SG_EFF_LOSS = [
+        ["cot", "COT"],
+        ["qlt", "Quality / Rework"],
+        ["cap", "Capacity"],
+        ["hlp", "Helper Reduction"],
+        ["abs", "Absenteeism"],
+        ["mc", "Machine Breakdown"],
+        ["fd", "Feeding Delay"],
+        ["fab", "Fabric Delay"],
+        ["trm", "Trims Delay"],
+        ["prt", "Printing Delay"],
+        ["pwr", "Electric Power"],
+        ["bus", "Bus Late"]
+    ];
+    const SG_EFF_NUM = x => {
+        let v = parseFloat(x);
+        return isFinite(v) ? v : 0
+    };
+
+    function sgEffCalc(r) {
+        let n = SG_EFF_NUM,
+            smv = n(r.sq),
+            wm = n(r.wm) || 420,
+            pD = n(r.po) + n(r.ph) + n(r.pq),
+            aD = n(r.ao) + n(r.ah) + n(r.aq),
+            ot = (n(r.ta) + n(r.tb)) * 120,
+            o7 = n(r.o7),
+            oo = n(r.oo),
+            work = aD * wm,
+            avail = work + ot,
+            planEff = pD * wm > 0 ? n(r.tg) * smv / (pD * wm) : 0,
+            ach7 = o7 * smv,
+            achOT = oo * smv,
+            AP = smv > 0 ? work / smv * planEff : 0,
+            AQ = smv > 0 ? ot / smv * planEff : 0,
+            reqMin = (AP + AQ) * smv,
+            AS = planEff > 0 ? AP - o7 : 0,
+            AT = planEff > 0 ? AQ - oo : 0,
+            L = {};
+        SG_EFF_LOSS.forEach(([k]) => L[k] = n(r[k]) * smv);
+        let ex7 = (AS < 0 ? AS : 0) * smv,
+            exOT = (AT < 0 ? AT : 0) * smv,
+            otLoss = (AT > 0 ? AT : 0) * smv;
+        return {
+            smv,
+            wm,
+            pD,
+            aD,
+            ot,
+            o7,
+            oo,
+            total: o7 + oo,
+            work,
+            avail,
+            reqMin,
+            ach7,
+            achOT,
+            achMin: ach7 + achOT,
+            planEff,
+            eff7: work > 0 ? ach7 / work : 0,
+            effOT: avail > 0 ? (ach7 + achOT) / avail : 0,
+            L,
+            ex7,
+            exOT,
+            otLoss,
+            fac: L.cot + L.qlt + L.cap + L.hlp + L.abs + L.mc + L.fd + ex7,
+            int: L.fab + L.trm + L.prt,
+            ext: L.pwr + L.bus,
+            otl: exOT + otLoss
+        }
+    }
+
+    function sgEffAgg(rows) {
+        let a = {
+                n: rows.length,
+                tg: 0,
+                pD: 0,
+                aD: 0,
+                po: 0,
+                ao: 0,
+                o7: 0,
+                oo: 0,
+                total: 0,
+                work: 0,
+                ot: 0,
+                avail: 0,
+                reqMin: 0,
+                ach7: 0,
+                achMin: 0,
+                fac: 0,
+                int: 0,
+                ext: 0,
+                otl: 0,
+                ex7: 0,
+                L: {}
+            },
+            days = new Set;
+        SG_EFF_LOSS.forEach(([k]) => a.L[k] = 0);
+        rows.forEach(r => {
+            let c = r._c || sgEffCalc(r);
+            days.add(r.d);
+            a.tg += SG_EFF_NUM(r.tg);
+            a.po += SG_EFF_NUM(r.po);
+            a.ao += SG_EFF_NUM(r.ao);
+            ["pD", "aD", "o7", "oo", "total", "work", "ot", "avail", "reqMin", "ach7", "achMin", "fac", "int", "ext", "otl", "ex7"].forEach(k => a[k] += c[k]);
+            SG_EFF_LOSS.forEach(([k]) => a.L[k] += c.L[k])
+        });
+        a.days = days.size;
+        a.planEff = a.avail > 0 ? a.reqMin / a.avail : 0;
+        a.eff7 = a.work > 0 ? a.ach7 / a.work : 0;
+        a.effOT = a.avail > 0 ? a.achMin / a.avail : 0;
+        a.pct = x => a.avail > 0 ? x / a.avail : 0;
+        return a
+    }
+
+    function sgEffWeek(d) {
+        let t = new Date(d + "T00:00:00"),
+            j = new Date(t.getFullYear(), 0, 1),
+            doy = Math.round((t - j) / 864e5);
+        return Math.floor((doy + j.getDay()) / 7) + 1
+    }
+
+
+    function sgEffBuild(styles, entries, lines, linePlans, unitName) {
+        let n = SG_EFF_NUM,
+            wm = Gh,
+            sMap = new Map((styles || []).map(x => [x.id, x])),
+            lMap = new Map((lines || []).map(x => [x.id, x])),
+            groups = new Map,
+            byDL = new Map,
+            REASON = [
+                [/mach|break|needle|motor|repair|m\/c/i, "mc"],
+                [/feed/i, "fd"],
+                [/fabric|cloth|cutting|shade/i, "fab"],
+                [/trim|button|zip|thread|label|access|elastic/i, "trm"],
+                [/print|emb/i, "prt"],
+                [/power|electric|light|current|generator/i, "pwr"],
+                [/bus|transport|late/i, "bus"],
+                [/absent|leave|attend/i, "abs"],
+                [/cot|change|style/i, "cot"],
+                [/quality|rework|reject|defect/i, "qlt"],
+                [/helper|training|cross/i, "hlp"]
+            ],
+            reasonKey = t => {
+                for (let [re, k] of REASON)
+                    if (re.test(t || "")) return k;
+                return "cap"
+            };
+        (entries || []).forEach(e => {
+            if (e.type !== "sewing" || !e.lineId) return;
+            let k = e.date + "|" + e.lineId + "|" + e.styleId;
+            groups.has(k) || groups.set(k, {
+                es: [],
+                date: e.date,
+                lineId: e.lineId,
+                styleId: e.styleId,
+                ot: 0,
+                loss: {}
+            });
+            groups.get(k).es.push(e)
+        });
+        groups.forEach(g => {
+            g.o7 = g.es.reduce((a, e) => a + n(e.qty), 0);
+            let k = g.date + "|" + g.lineId;
+            byDL.has(k) || byDL.set(k, []);
+            byDL.get(k).push(g)
+        });
+        let find = e => {
+            let a = groups.get(e.date + "|" + e.lineId + "|" + e.styleId);
+            if (a) return a;
+            if (e.lineId) {
+                let l = byDL.get(e.date + "|" + e.lineId);
+                return l ? l.slice().sort((x, y) => y.o7 - x.o7)[0] : null
+            }
+            let c = Array.from(groups.values()).filter(x => x.date === e.date && x.styleId === e.styleId);
+            return c[0] || null
+        };
+        (entries || []).forEach(e => {
+            let g;
+            if (e.type === "ot") {
+                if (g = find(e)) g.ot += n(e.qty)
+            } else if (e.type === "downtime") {
+                if (g = find(e)) {
+                    let k = reasonKey(e.reason);
+                    g.loss[k] = (g.loss[k] || 0) + n(e.qty)
+                }
+            } else if (e.type === "rework" || e.type === "sewingReject") {
+                if (g = find(e)) {
+                    g.q = (g.q || 0) + n(e.qty)
+                }
+            }
+        });
+        let rows = [];
+        groups.forEach(g => {
+            let st = sMap.get(g.styleId) || {},
+                ln = lMap.get(g.lineId) || {},
+                sew = (st.departments || []).find(x => x.key === "sewing"),
+                smv = n(sew && sew.smv),
+                po = n(st.lineBooking && st.lineBooking.manpower) || n(ln.manpower),
+                hrs = new Map,
+                _h = g.es.forEach(e => {
+                    if (e.hour) hrs.set(e.hour, n(e.actualManpower) || hrs.get(e.hour) || 0)
+                }),
+                wmr = hrs.size > 0 ? Math.min(hrs.size, Math.round(wm / 60)) * 60 : wm,
+                ao = hrs.size > 0 ? Array.from(hrs.values()).reduce((a, x) => a + (x || po), 0) / hrs.size : Math.max(0, ...g.es.map(e => n(e.actualManpower))) || po,
+                sib = byDL.get(g.date + "|" + g.lineId),
+                tot = sib.reduce((a, x) => a + x.o7, 0),
+                pl = (linePlans || []).find(x => x.lineId === g.lineId && x.date === g.date),
+                tg = pl && n(pl.planQty) > 0 ? n(pl.planQty) * (tot > 0 ? g.o7 / tot : 1 / sib.length) * (wmr / wm) : smv > 0 ? po * wmr / smv * (n(st.targetEfficiencyPct) || 65) / 100 : 0,
+                r = {
+                    id: g.date + "|" + g.lineId + "|" + g.styleId,
+                    d: g.date,
+                    u: unitName || "Factory",
+                    l: ln.lineNo || "Line",
+                    b: st.buyer || "",
+                    ds: st.product || "",
+                    st: st.styleNo || "",
+                    wm: wmr,
+                    sq: smv,
+                    tg: Math.round(tg),
+                    po: po,
+                    ao: ao,
+                    o7: g.o7,
+                    ta: g.ot / 120,
+                    dt: Object.values(g.loss).reduce((a, x) => a + x, 0)
+                };
+            Object.keys(g.loss).forEach(k => r[k] = smv > 0 ? g.loss[k] / smv : 0);
+            g.q && smv > 0 && (r.qlt = (r.qlt || 0) + g.q);
+            rows.push(r)
+        });
+        return rows
+    }
+
+    function SgEffDaily({
+        styles: styles,
+        entries: entries,
+        lines: lines,
+        linePlans: linePlans,
+        factoryName: factoryName
+    }) {
+        let h = f.default.createElement,
+            n = SG_EFF_NUM,
+            pad = x => String(x).padStart(2, "0"),
+            ymd = d => d.getFullYear() + "-" + pad(d.getMonth() + 1) + "-" + pad(d.getDate()),
+            todayS = ymd(new Date),
+            pc = x => (x * 100).toFixed(1) + "%",
+            i0 = x => Math.round(x).toLocaleString("en-IN"),
+            rowsAll = (0, f.useMemo)(() => sgEffBuild(styles, entries, lines, linePlans, factoryName).map(r => ({
+                ...r,
+                _c: sgEffCalc(r)
+            })), [styles, entries, lines, linePlans, factoryName]),
+            maxD = rowsAll.reduce((m, r) => r.d > m ? r.d : m, ""),
+            [tab, setTab] = (0, f.useState)("factory"),
+            [from, setFrom] = (0, f.useState)(() => (maxD || todayS).slice(0, 8) + "01"),
+            [to, setTo] = (0, f.useState)(() => maxD || todayS),
+            [unit, setUnit] = (0, f.useState)(""),
+            [editId, setEditId] = (0, f.useState)(null),
+            EMPTY = {
+                d: todayS,
+                u: "",
+                l: "",
+                b: "",
+                ds: "",
+                st: "",
+                rd: "",
+                wm: "420",
+                sq: "",
+                tg: "",
+                po: "",
+                ph: "",
+                pq: "",
+                ao: "",
+                ah: "",
+                aq: "",
+                o7: "",
+                ta: "",
+                tb: "",
+                oo: ""
+            },
+            [fm, setFm] = (0, f.useState)(EMPTY),
+            inRange = rowsAll.filter(r => r.d >= from && r.d <= to),
+            units = Array.from(new Set(rowsAll.map(r => r.u).filter(Boolean))).sort(),
+            lineNames = Array.from(new Set([...(lines || []).map(x => x.lineNo).filter(Boolean), ...rowsAll.map(r => r.l).filter(Boolean)])),
+            buyers = Array.from(new Set(rowsAll.map(r => r.b).filter(Boolean))),
+            scoped = unit ? inRange.filter(r => r.u === unit) : inRange,
+            cur = sgEffCalc(fm),
+            S = {
+                card: {
+                    background: "#fff",
+                    border: "1px solid #e7e5e4",
+                    borderRadius: 16,
+                    padding: 14
+                },
+                th: {
+                    padding: "6px 8px",
+                    fontSize: 10,
+                    fontWeight: 700,
+                    textTransform: "uppercase",
+                    letterSpacing: ".04em",
+                    color: "#57534e",
+                    background: "#f5f5f4",
+                    whiteSpace: "nowrap",
+                    textAlign: "right",
+                    position: "sticky",
+                    top: 0
+                },
+                td: {
+                    padding: "6px 8px",
+                    fontSize: 12,
+                    whiteSpace: "nowrap",
+                    textAlign: "right",
+                    borderTop: "1px solid #f0efee",
+                    fontVariantNumeric: "tabular-nums"
+                },
+                inp: {
+                    width: "100%",
+                    border: "1px solid #d6d3d1",
+                    borderRadius: 8,
+                    padding: "6px 8px",
+                    fontSize: 13,
+                    outline: "none",
+                    background: "#fff"
+                },
+                lbl: {
+                    fontSize: 10,
+                    fontWeight: 700,
+                    color: "#78716c",
+                    textTransform: "uppercase",
+                    letterSpacing: ".04em",
+                    display: "block",
+                    marginBottom: 2
+                },
+                h4: {
+                    fontSize: 11,
+                    fontWeight: 800,
+                    color: "#57534e",
+                    textTransform: "uppercase",
+                    letterSpacing: ".05em",
+                    margin: "0 0 8px"
+                },
+                btn: (on, c) => ({
+                    fontSize: 12,
+                    fontWeight: 700,
+                    padding: "6px 12px",
+                    borderRadius: 10,
+                    border: "1px solid " + (on ? c || "#0f766e" : "#d6d3d1"),
+                    background: on ? c || "#0f766e" : "#fff",
+                    color: on ? "#fff" : "#57534e",
+                    cursor: "pointer",
+                    whiteSpace: "nowrap"
+                })
+            },
+            fld = (k, label, o = {}) => h("div", {
+                key: k,
+                style: {
+                    minWidth: 0
+                }
+            }, h("label", {
+                style: S.lbl
+            }, label), h("input", {
+                type: o.type || "number",
+                step: "any",
+                inputMode: o.type === "text" || o.type === "date" ? undefined : "decimal",
+                list: o.list,
+                value: fm[k] ?? "",
+                onChange: e => setFm({
+                    ...fm,
+                    [k]: e.target.value
+                }),
+                style: S.inp
+            })),
+            grid = (cols, kids) => h("div", {
+                style: {
+                    display: "grid",
+                    gridTemplateColumns: "repeat(auto-fill,minmax(" + cols + "px,1fr))",
+                    gap: 8
+                }
+            }, kids),
+            saveEntry = () => {
+                if (!fm.d || !fm.sq || !fm.u) {
+                    window.alert("Date, Unit and SMV are required.");
+                    return
+                }
+                let rec = {};
+                Object.keys(fm).forEach(k => {
+                    if (fm[k] !== "" && fm[k] != null && fm[k] !== "0") rec[k] = fm[k]
+                });
+                rec.id = editId || sr();
+                rec.fid = factoryId;
+                onSet(all => editId ? all.map(x => x.id === editId ? rec : x) : [...all, rec]);
+                setEditId(null);
+                setFm({
+                    ...EMPTY,
+                    d: fm.d,
+                    u: fm.u,
+                    wm: fm.wm
+                })
+            },
+            exportAoa = (name, head, data, pctCols) => {
+                let ws = $a.aoa_to_sheet([head, ...data]);
+                (pctCols || []).forEach(ci => data.forEach((_, ri) => {
+                    let c = ws[$a.encode_cell({
+                        r: ri + 1,
+                        c: ci
+                    })];
+                    c && typeof c.v === "number" && (c.z = "0.0%")
+                }));
+                let wb = $a.book_new();
+                $a.book_append_sheet(wb, ws, name.slice(0, 30));
+                TD(wb, name.replace(/[^A-Za-z0-9_-]+/g, "_") + "_" + from + "_to_" + to + ".xlsx")
+            },
+            table = (name, cols, data, o = {}) => h("div", {
+                style: S.card
+            }, h("div", {
+                style: {
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                    marginBottom: 8,
+                    gap: 8,
+                    flexWrap: "wrap"
+                }
+            }, h("h4", {
+                style: {
+                    ...S.h4,
+                    margin: 0
+                }
+            }, name), data.length > 0 && h("button", {
+                onClick: () => exportAoa(name, cols.map(c => c.h), data.map(r => r.v), cols.map((c, i) => c.t === "p" || c.t === "e" ? i : -1).filter(i => i >= 0)),
+                style: S.btn(false)
+            }, "Download Excel")), data.length === 0 ? h("p", {
+                style: {
+                    fontSize: 12,
+                    color: "#a8a29e"
+                }
+            }, "No entries in this date range.") : h("div", {
+                style: {
+                    overflowX: "auto",
+                    maxHeight: o.maxH || 420
+                }
+            }, h("table", {
+                style: {
+                    width: "100%",
+                    borderCollapse: "collapse"
+                }
+            }, h("thead", null, h("tr", null, cols.map((c, i) => h("th", {
+                key: i,
+                style: {
+                    ...S.th,
+                    textAlign: i < (o.textCols || 1) ? "left" : "right"
+                }
+            }, c.h)))), h("tbody", null, data.map((r, ri) => h("tr", {
+                key: ri,
+                style: r.bold ? {
+                    background: "#f0fdfa",
+                    fontWeight: 800
+                } : null
+            }, cols.map((c, i) => {
+                let v = r.v[i],
+                    txt = c.t === "p" || c.t === "e" ? pc(v) : c.t === "i" ? i0(v) : c.t === "d" ? Number(v).toFixed(2) : v,
+                    col = null;
+                if (c.t === "e" && c.cmp != null) col = v >= r.v[c.cmp] ? "#047857" : "#dc2626";
+                if (c.t === "l" || c.neg) col = v > 0 ? "#dc2626" : null;
+                return h("td", {
+                    key: i,
+                    style: {
+                        ...S.td,
+                        textAlign: i < (o.textCols || 1) ? "left" : "right",
+                        color: col,
+                        fontWeight: c.t === "e" ? 700 : r.bold ? 800 : 400
+                    }
+                }, txt)
+            }))))))),
+            chartBox = (title, kid) => h("div", {
+                style: S.card
+            }, h("h4", {
+                style: S.h4
+            }, title), h("div", {
+                style: {
+                    height: 260
+                }
+            }, h(ff, {
+                width: "100%",
+                height: "100%"
+            }, kid))),
+            axes = fmtPct => [h($u, {
+                key: "g",
+                strokeDasharray: "3 3",
+                stroke: "#e7e5e4"
+            }), h(rc, {
+                key: "x",
+                dataKey: "name",
+                tick: {
+                    fontSize: 10
+                }
+            }), h(ac, {
+                key: "y",
+                tick: {
+                    fontSize: 10
+                },
+                tickFormatter: fmtPct ? (v => Math.round(v) + "%") : undefined,
+                width: 40
+            }), h(Ef, {
+                key: "t",
+                formatter: fmtPct ? (v => v + "%") : undefined
+            }), h(B0, {
+                key: "l",
+                wrapperStyle: {
+                    fontSize: 11
+                }
+            })],
+            r1 = x => Number((x * 100).toFixed(1)),
+            groupBy = (rows, kf) => {
+                let m = new Map;
+                rows.forEach(r => {
+                    let k = kf(r);
+                    m.has(k) || m.set(k, []);
+                    m.get(k).push(r)
+                });
+                return Array.from(m.entries()).sort((a, b) => String(a[0]).localeCompare(String(b[0]), undefined, {
+                    numeric: true
+                }))
+            },
+            tabs = [
+                ["entry", "Daily Detail"],
+                ["week", "Week-wise Eff"],
+                ["factory", "Factory-wise Eff"],
+                ["line", "Line-wise Eff"],
+                ["style", "Style-wise Eff"],
+                ["loss", "Loss Factor"]
+            ],
+            body = null;
+
+        if (tab === "entry") {
+            let list = inRange.slice().sort((a, b) => a.d < b.d ? 1 : a.d > b.d ? -1 : (a.l || "").localeCompare(b.l || "", undefined, {
+                numeric: true
+            }));
+            body = table("Daily detail (" + from + " to " + to + ") \u2014 auto from production, OT, downtime entries", [{
+                h: "Date"
+            }, {
+                h: "Line"
+            }, {
+                h: "Style"
+            }, {
+                h: "Buyer"
+            }, {
+                h: "SMV",
+                t: "d"
+            }, {
+                h: "Plan tgt",
+                t: "i"
+            }, {
+                h: "Plan MP",
+                t: "i"
+            }, {
+                h: "Actual MP",
+                t: "i"
+            }, {
+                h: "Output",
+                t: "i"
+            }, {
+                h: "OT min",
+                t: "i"
+            }, {
+                h: "Downtime min",
+                t: "i"
+            }, {
+                h: "Plan eff",
+                t: "p"
+            }, {
+                h: "Actual eff",
+                t: "e",
+                cmp: 11
+            }], list.map(r => ({
+                v: [r.d, r.l, r.st, r.b, n(r.sq), n(r.tg), n(r.po), n(r.ao), r._c.total, n(r.ta) * 120, n(r.dt), r._c.planEff, r._c.effOT]
+            })), {
+                textCols: 4,
+                maxH: 600
+            })
+        } else if (tab === "week") {
+            let weeks = Array.from(new Set(scoped.map(r => sgEffWeek(r.d)))).sort((a, b) => a - b),
+                us = unit ? [unit] : units.filter(u => scoped.some(r => r.u === u)),
+                data = us.map(u => {
+                    let rs = scoped.filter(r => r.u === u),
+                        a = sgEffAgg(rs);
+                    return {
+                        v: [u, a.tg, a.reqMin, a.pD, a.aD, a.total, a.planEff, ...weeks.map(w => {
+                            let x = sgEffAgg(rs.filter(r => sgEffWeek(r.d) === w));
+                            return x.n ? x.effOT : 0
+                        }), a.effOT]
+                    }
+                }),
+                tot = sgEffAgg(scoped);
+            data.push({
+                bold: !0,
+                v: ["FACTORY", tot.tg, tot.reqMin, tot.pD, tot.aD, tot.total, tot.planEff, ...weeks.map(w => {
+                    let x = sgEffAgg(scoped.filter(r => sgEffWeek(r.d) === w));
+                    return x.n ? x.effOT : 0
+                }), tot.effOT]
+            });
+            let cols = [{
+                    h: "Unit"
+                }, {
+                    h: "Plan target",
+                    t: "i"
+                }, {
+                    h: "Planned min",
+                    t: "i"
+                }, {
+                    h: "Plan directs",
+                    t: "i"
+                }, {
+                    h: "Actual directs",
+                    t: "i"
+                }, {
+                    h: "Total output",
+                    t: "i"
+                }, {
+                    h: "Planned eff",
+                    t: "p"
+                }, ...weeks.map(w => ({
+                    h: "Wk " + w,
+                    t: "e",
+                    cmp: 6
+                })), {
+                    h: "Period eff",
+                    t: "e",
+                    cmp: 6
+                }],
+                ch = weeks.map((w, wi) => {
+                    let o = {
+                        name: "Wk " + w
+                    };
+                    data.forEach(r => o[r.v[0]] = r1(r.v[7 + wi]));
+                    return o
+                }),
+                pal = ["#0f766e", "#f59e0b", "#6366f1", "#dc2626", "#0891b2", "#84cc16", "#a855f7", "#ea580c", "#475569", "#db2777"];
+            body = h(f.default.Fragment, null, weeks.length > 0 && chartBox("Week-wise efficiency % (with OT)", h(by, {
+                data: ch,
+                margin: {
+                    top: 5,
+                    right: 10,
+                    left: -10,
+                    bottom: 0
+                }
+            }, axes(!0), data.map((r, i) => h(If, {
+                key: r.v[0],
+                type: "monotone",
+                dataKey: r.v[0],
+                stroke: r.bold ? "#1c1917" : pal[i % pal.length],
+                strokeWidth: r.bold ? 3 : 2,
+                dot: {
+                    r: 3
+                }
+            })))), table("Week-wise Factory Efficiency", cols, data))
+        } else if (tab === "factory") {
+            let us = units.filter(u => inRange.some(r => r.u === u)),
+                data = us.map(u => {
+                    let a = sgEffAgg(inRange.filter(r => r.u === u));
+                    return {
+                        v: [u, a.tg, a.reqMin, a.pD, a.aD, a.avail, a.o7, a.oo, a.total, a.achMin, a.planEff, a.eff7, a.effOT, a.pct(a.fac), a.pct(a.int), a.pct(a.ext), a.pct(a.otl)]
+                    }
+                }),
+                t = sgEffAgg(inRange);
+            data.push({
+                bold: !0,
+                v: ["FACTORY", t.tg, t.reqMin, t.pD, t.aD, t.avail, t.o7, t.oo, t.total, t.achMin, t.planEff, t.eff7, t.effOT, t.pct(t.fac), t.pct(t.int), t.pct(t.ext), t.pct(t.otl)]
+            });
+            body = h(f.default.Fragment, null, us.length > 0 && chartBox("Planned vs Actual efficiency by unit", h(Ey, {
+                data: data.map(r => ({
+                    name: r.v[0],
+                    "Planned eff": r1(r.v[10]),
+                    ["Actual eff (" + Math.round(Gh / 60) + " hrs)"]: r1(r.v[11]),
+                    "Actual eff (with OT)": r1(r.v[12])
+                })),
+                margin: {
+                    top: 5,
+                    right: 10,
+                    left: -10,
+                    bottom: 0
+                }
+            }, axes(!0), h(Df, {
+                dataKey: "Planned eff",
+                fill: "#d6d3d1",
+                radius: [4, 4, 0, 0]
+            }), h(Df, {
+                dataKey: "Actual eff (" + Math.round(Gh / 60) + " hrs)",
+                fill: "#f59e0b",
+                radius: [4, 4, 0, 0]
+            }), h(Df, {
+                dataKey: "Actual eff (with OT)",
+                fill: "#0f766e",
+                radius: [4, 4, 0, 0]
+            }))), table("Factory-wise Efficiency & Loss Factor", [{
+                h: "Unit"
+            }, {
+                h: "Plan target",
+                t: "i"
+            }, {
+                h: "Planned min",
+                t: "i"
+            }, {
+                h: "Plan directs",
+                t: "i"
+            }, {
+                h: "Actual directs",
+                t: "i"
+            }, {
+                h: "Available min",
+                t: "i"
+            }, {
+                h: "Output " + Math.round(Gh / 60) + " hrs",
+                t: "i"
+            }, {
+                h: "Output OT",
+                t: "i"
+            }, {
+                h: "Total output",
+                t: "i"
+            }, {
+                h: "Achieved min",
+                t: "i"
+            }, {
+                h: "Planned eff",
+                t: "p"
+            }, {
+                h: "Eff " + Math.round(Gh / 60) + " hrs",
+                t: "e",
+                cmp: 10
+            }, {
+                h: "Eff + OT",
+                t: "e",
+                cmp: 10
+            }, {
+                h: "Factory loss",
+                t: "p",
+                neg: !0
+            }, {
+                h: "Internal loss",
+                t: "p",
+                neg: !0
+            }, {
+                h: "External loss",
+                t: "p",
+                neg: !0
+            }, {
+                h: "OT loss",
+                t: "p"
+            }], data))
+        } else if (tab === "line") {
+            let data = groupBy(scoped, r => (r.u || "-") + "||" + (r.l || "-")).map(([k, rs]) => {
+                let a = sgEffAgg(rs),
+                    [u, l] = k.split("||");
+                return {
+                    v: [u, l, a.days, a.tg, a.pD, a.aD, a.total, a.planEff, a.eff7, a.effOT, a.pct(a.fac), a.pct(a.int), a.pct(a.ext), a.pct(a.otl)]
+                }
+            });
+            body = h(f.default.Fragment, null, data.length > 0 && chartBox("Line-wise planned vs actual efficiency", h(Ey, {
+                data: data.map(r => ({
+                    name: (unit ? "" : r.v[0] + " ") + r.v[1],
+                    "Planned eff": r1(r.v[7]),
+                    "Actual eff (with OT)": r1(r.v[9])
+                })),
+                margin: {
+                    top: 5,
+                    right: 10,
+                    left: -10,
+                    bottom: 0
+                }
+            }, axes(!0), h(Df, {
+                dataKey: "Planned eff",
+                fill: "#d6d3d1",
+                radius: [4, 4, 0, 0]
+            }), h(Df, {
+                dataKey: "Actual eff (with OT)",
+                fill: "#0f766e",
+                radius: [4, 4, 0, 0]
+            }))), table("Line-wise Efficiency", [{
+                h: "Unit"
+            }, {
+                h: "Line"
+            }, {
+                h: "Days",
+                t: "i"
+            }, {
+                h: "Plan target",
+                t: "i"
+            }, {
+                h: "Plan directs",
+                t: "i"
+            }, {
+                h: "Actual directs",
+                t: "i"
+            }, {
+                h: "Total output",
+                t: "i"
+            }, {
+                h: "Planned eff",
+                t: "p"
+            }, {
+                h: "Eff " + Math.round(Gh / 60) + " hrs",
+                t: "e",
+                cmp: 7
+            }, {
+                h: "Eff + OT",
+                t: "e",
+                cmp: 7
+            }, {
+                h: "Factory loss",
+                t: "p",
+                neg: !0
+            }, {
+                h: "Internal loss",
+                t: "p",
+                neg: !0
+            }, {
+                h: "External loss",
+                t: "p",
+                neg: !0
+            }, {
+                h: "OT loss",
+                t: "p"
+            }], data, {
+                textCols: 2
+            }))
+        } else if (tab === "style") {
+            let data = groupBy(scoped, r => [r.b || "-", r.st || "-", r.ds || "", r.l || "-"].join("||")).map(([k, rs]) => {
+                let a = sgEffAgg(rs),
+                    [b, s, d, l] = k.split("||");
+                return {
+                    v: [b, s, d, l, a.days, a.pD, a.aD, a.total, a.planEff, a.effOT, a.pct(a.fac), a.pct(a.int), a.pct(a.ext), a.pct(a.otl)]
+                }
+            });
+            body = table("Style-wise Efficiency & Loss Factor", [{
+                h: "Buyer"
+            }, {
+                h: "Style #"
+            }, {
+                h: "Desc."
+            }, {
+                h: "Line"
+            }, {
+                h: "Run days",
+                t: "i"
+            }, {
+                h: "Plan directs",
+                t: "i"
+            }, {
+                h: "Actual directs",
+                t: "i"
+            }, {
+                h: "Total output",
+                t: "i"
+            }, {
+                h: "Planned eff",
+                t: "p"
+            }, {
+                h: "Achieved eff",
+                t: "e",
+                cmp: 8
+            }, {
+                h: "Factory loss",
+                t: "p",
+                neg: !0
+            }, {
+                h: "Internal loss",
+                t: "p",
+                neg: !0
+            }, {
+                h: "External loss",
+                t: "p",
+                neg: !0
+            }, {
+                h: "OT loss",
+                t: "p"
+            }], data, {
+                textCols: 4,
+                maxH: 560
+            })
+        } else if (tab === "loss") {
+            let a = sgEffAgg(scoped),
+                lossRows = [...SG_EFF_LOSS.map(([k, l]) => [l, a.L[k]]), ["Production excess/short (" + Math.round(Gh / 60) + " hrs)", a.ex7], ["Overtime loss / excess", a.otl]],
+                chart = lossRows.map(([l, m]) => ({
+                    name: l,
+                    "Loss % of available min": r1(a.pct(m))
+                })).filter(x => x["Loss % of available min"] !== 0),
+                us = units.filter(u => scoped.some(r => r.u === u)),
+                stacked = us.map(u => {
+                    let x = sgEffAgg(scoped.filter(r => r.u === u));
+                    return {
+                        name: u,
+                        Factory: r1(x.pct(x.fac)),
+                        Internal: r1(x.pct(x.int)),
+                        External: r1(x.pct(x.ext)),
+                        Overtime: r1(x.pct(x.otl))
+                    }
+                });
+            body = h(f.default.Fragment, null, h("div", {
+                style: {
+                    ...S.card,
+                    display: "flex",
+                    gap: 18,
+                    flexWrap: "wrap"
+                }
+            }, [
+                ["Available min", i0(a.avail)],
+                ["Planned min", i0(a.reqMin)],
+                ["Achieved min", i0(a.achMin)],
+                ["Planned eff", pc(a.planEff)],
+                ["Actual eff", pc(a.effOT)],
+                ["Gap", pc(a.effOT - a.planEff)]
+            ].map(([x, y]) => h("div", {
+                key: x
+            }, h("div", {
+                style: S.lbl
+            }, x), h("div", {
+                style: {
+                    fontSize: 18,
+                    fontWeight: 800,
+                    color: x === "Gap" && a.effOT < a.planEff ? "#dc2626" : "#134e4a"
+                }
+            }, y)))), chart.length > 0 && chartBox("Loss factor % (of available minutes)", h(Ey, {
+                data: chart,
+                layout: "vertical",
+                margin: {
+                    top: 5,
+                    right: 20,
+                    left: 40,
+                    bottom: 0
+                }
+            }, h($u, {
+                strokeDasharray: "3 3",
+                stroke: "#e7e5e4"
+            }), h(rc, {
+                type: "number",
+                tick: {
+                    fontSize: 10
+                },
+                tickFormatter: v => v + "%"
+            }), h(ac, {
+                type: "category",
+                dataKey: "name",
+                tick: {
+                    fontSize: 10
+                },
+                width: 150
+            }), h(Ef, {
+                formatter: v => v + "%"
+            }), h(Df, {
+                dataKey: "Loss % of available min",
+                fill: "#dc2626",
+                radius: [0, 4, 4, 0]
+            }))), us.length > 1 && chartBox("Loss by unit (stacked %)", h(Ey, {
+                data: stacked,
+                margin: {
+                    top: 5,
+                    right: 10,
+                    left: -10,
+                    bottom: 0
+                }
+            }, axes(!0), h(Df, {
+                dataKey: "Factory",
+                stackId: "a",
+                fill: "#dc2626"
+            }), h(Df, {
+                dataKey: "Internal",
+                stackId: "a",
+                fill: "#f59e0b"
+            }), h(Df, {
+                dataKey: "External",
+                stackId: "a",
+                fill: "#6366f1"
+            }), h(Df, {
+                dataKey: "Overtime",
+                stackId: "a",
+                fill: "#0891b2"
+            }))), table("Factory-wise Loss Factor (minutes)", [{
+                h: "Loss reason"
+            }, {
+                h: "Minutes",
+                t: "i"
+            }, {
+                h: "% of available",
+                t: "p"
+            }], [{
+                v: ["Planned working min", a.work, 0],
+                skip: !0
+            }, ...lossRows.map(([l, m]) => ({
+                v: [l, m, a.pct(m)]
+            })), {
+                bold: !0,
+                v: ["Total loss", a.fac + a.int + a.ext + a.otl, a.pct(a.fac + a.int + a.ext + a.otl)]
+            }].filter(r => !r.skip), {
+                maxH: 520
+            }))
+        }
+        return h("div", {
+            className: "space-y-4 pb-16"
+        }, h("div", {
+            style: {
+                ...S.card,
+                display: "flex",
+                gap: 8,
+                flexWrap: "wrap",
+                alignItems: "center"
+            }
+        }, h("h3", {
+            style: {
+                fontSize: 14,
+                fontWeight: 800,
+                color: "#44403c",
+                marginRight: 6
+            }
+        }, "Plan vs Actual Efficiency Report"), h("span", {
+            style: S.lbl
+        }, "From"), h("input", {
+            type: "date",
+            value: from,
+            max: to,
+            onChange: e => setFrom(e.target.value),
+            style: {
+                ...S.inp,
+                width: 140
+            }
+        }), h("span", {
+            style: S.lbl
+        }, "To"), h("input", {
+            type: "date",
+            value: to,
+            min: from,
+            onChange: e => setTo(e.target.value),
+            style: {
+                ...S.inp,
+                width: 140
+            }
+        }), h("select", {
+            value: unit,
+            onChange: e => setUnit(e.target.value),
+            style: {
+                ...S.inp,
+                width: 130
+            }
+        }, h("option", {
+            value: ""
+        }, "All units"), units.map(u => h("option", {
+            key: u,
+            value: u
+        }, u))), h("button", {
+            onClick: () => {
+                setFrom((maxD || todayS).slice(0, 8) + "01");
+                setTo(maxD || todayS)
+            },
+            style: S.btn(false)
+        }, "Latest month")), h("div", {
+            style: {
+                display: "flex",
+                gap: 6,
+                flexWrap: "wrap"
+            }
+        }, tabs.map(([k, l]) => h("button", {
+            key: k,
+            onClick: () => setTab(k),
+            style: S.btn(tab === k)
+        }, l))), body)
+    }
+
     function SgWipReport({
         entries: entries,
         styles: styles,
@@ -85400,25 +86467,39 @@ ${d.type==="returnable"?'<div style="font-size:11px;margin-top:6px"><b>Returnabl
         })()))
     }
 
-    function c3(e) {
+    // ---- TNA auto actual date: earliest inward / start date per department ----
+    function sgTnaAuto(st, entries, key) {
+        let minD = arr => arr.reduce((m, d) => d && (!m || d < m) ? d : m, "");
+        if (key === "material") return minD((st.trimsReceipts || []).map(r => r.date));
+        if (key === "fabric") return minD((st.fabricReceipts || []).map(r => r.date));
+        if (key === "cutting" || key === "sewing" || key === "packing") return minD((entries || []).filter(x => x.styleId === st.id && x.type === key && oe(x.qty) > 0).map(x => x.date));
+        return ""
+    }
+
+    function sgTnaActual(st, entries, key) {
+        return sgTnaAuto(st, entries, key) || st.tna?.[key]?.actual || ""
+    }
+
+    function c3(e, sgEn) {
         return FA.reduce((t, r) => {
             let n = e.tna?.[r.key] || {
                     plan: "",
                     actual: ""
                 },
-                a = MA(n.plan, n.actual);
+                a = MA(n.plan, sgTnaActual(e, sgEn, r.key));
             return t + (a && a.label.includes("late") || a && a.label.includes("overdue") ? 1 : 0)
         }, 0)
     }
 
     function HOe({
         styles: e,
-        onUpdate: t
+        onUpdate: t,
+        entries: sgEn
     }) {
         let [r, n] = (0, f.useState)(""), [a, i] = (0, f.useState)(null), s = (0, f.useMemo)(() => {
             let l = r.trim().toLowerCase();
-            return e.filter(c => c.status !== "shipped" && (!l || (c.styleNo || "").toLowerCase().includes(l) || (c.buyer || "").toLowerCase().includes(l))).slice().sort((c, d) => c3(d) - c3(c))
-        }, [e, r]), o = (l, u, c, d) => t({
+            return e.filter(c => c.status !== "shipped" && (!l || (c.styleNo || "").toLowerCase().includes(l) || (c.buyer || "").toLowerCase().includes(l))).slice().sort((c, d) => c3(d, sgEn) - c3(c, sgEn))
+        }, [e, r, sgEn]), o = (l, u, c, d) => t({
             ...l,
             tna: {
                 ...l.tna,
@@ -85456,7 +86537,7 @@ ${d.type==="returnable"?'<div style="font-size:11px;margin-top:6px"><b>Returnabl
             className: "space-y-2.5"
         }, s.map(l => {
             let u = a === l.id,
-                c = c3(l);
+                c = c3(l, sgEn);
             return f.default.createElement("div", {
                 key: l.id,
                 className: "rounded-2xl border border-stone-200 bg-white overflow-hidden"
@@ -85492,7 +86573,9 @@ ${d.type==="returnable"?'<div style="font-size:11px;margin-top:6px"><b>Returnabl
                         plan: "",
                         actual: ""
                     },
-                    p = MA(h.plan, h.actual);
+                    sgAct = sgTnaActual(l, sgEn, d.key),
+                    sgIsAuto = d.key !== "shipment",
+                    p = MA(h.plan, sgAct);
                 return f.default.createElement("span", {
                     key: d.key,
                     className: `text-[10px] font-semibold px-2 py-1 rounded-full whitespace-nowrap ${p?p.color:"bg-stone-100 text-stone-400"}`
@@ -85506,7 +86589,9 @@ ${d.type==="returnable"?'<div style="font-size:11px;margin-top:6px"><b>Returnabl
                         plan: "",
                         actual: ""
                     },
-                    p = MA(h.plan, h.actual);
+                    sgAct = sgTnaActual(l, sgEn, d.key),
+                    sgIsAuto = d.key !== "shipment",
+                    p = MA(h.plan, sgAct);
                 return f.default.createElement("div", {
                     key: d.key,
                     className: "rounded-lg border border-stone-200 bg-white p-2.5"
@@ -85523,7 +86608,13 @@ ${d.type==="returnable"?'<div style="font-size:11px;margin-top:6px"><b>Returnabl
                     type: "date",
                     value: h.plan,
                     onChange: m => o(l, d.key, "plan", m)
-                }), f.default.createElement(di, {
+                }), sgIsAuto ? f.default.createElement("div", {
+                    className: "flex flex-col gap-0.5"
+                }, f.default.createElement("span", {
+                    className: "text-[9px] uppercase tracking-wider text-stone-400 font-semibold"
+                }, "Actual Date \u00b7 Auto"), f.default.createElement("div", {
+                    className: `w-full rounded-lg border px-1.5 py-1.5 text-xs tabular-nums ${sgAct?"border-emerald-200 bg-emerald-50 text-emerald-700 font-semibold":"border-stone-200 bg-stone-50 text-stone-400"}`
+                }, sgAct ? lr(sgAct) : "Waiting for entry")) : f.default.createElement(di, {
                     label: "Actual Date",
                     type: "date",
                     value: h.actual,
@@ -85707,7 +86798,8 @@ ${d.type==="returnable"?'<div style="font-size:11px;margin-top:6px"><b>Returnabl
                     plan: "",
                     actual: ""
                 },
-                m = MA(p.plan, p.actual);
+                sgAct = sgTnaActual(a, t, h.key),
+                m = MA(p.plan, sgAct);
             return f.default.createElement("div", {
                 key: h.key,
                 className: "flex items-center justify-between text-xs bg-stone-50 rounded-md px-2.5 py-1.5"
@@ -85715,13 +86807,1100 @@ ${d.type==="returnable"?'<div style="font-size:11px;margin-top:6px"><b>Returnabl
                 className: "font-semibold text-stone-600"
             }, h.label), f.default.createElement("span", {
                 className: "text-stone-400"
-            }, lr(p.plan) || "\u2014", " \u2192 ", lr(p.actual) || "\u2014"), m && f.default.createElement("span", {
+            }, lr(p.plan) || "\u2014", " \u2192 ", lr(sgAct) || "\u2014"), m && f.default.createElement("span", {
                 className: `text-[10px] font-semibold px-2 py-1 rounded-full whitespace-nowrap ${m.color}`
             }, m.label))
         })))))
     }
 
-    function zOe({
+    
+    /* ===== SGPS Analytics: From/To range + report type + chart type ===== */
+    const SG_AN_COL = ["#f59e0b", "#0f766e", "#6366f1", "#ef4444", "#10b981", "#0ea5e9", "#a855f7", "#78716c"];
+
+    function sgAnChart(P) {
+        let h = f.default.createElement,
+            type = P.type,
+            labels = P.labels,
+            series = P.series,
+            unit = P.unit || "",
+            fmt = v => (Math.round(v * 10) / 10).toLocaleString("en-IN"),
+            trunc = (t, n) => (t = String(t), t.length > n ? t.slice(0, n - 1) + "\u2026" : t),
+            all = [];
+        series.forEach(x => x.values.forEach(v => {
+            typeof v === "number" && isFinite(v) && all.push(v)
+        }));
+        if (!labels.length || !all.some(v => v > 0)) return h("div", {
+            style: {
+                padding: "28px 8px",
+                textAlign: "center",
+                color: "#a8a29e",
+                fontSize: 12
+            }
+        }, "Intha range-la data illa \u2014 entries / date range check pannunga.");
+        let legend = series.length > 1 && type !== "donut" ? h("div", {
+            style: {
+                display: "flex",
+                flexWrap: "wrap",
+                gap: 10,
+                fontSize: 11,
+                color: "#57534e",
+                marginBottom: 4
+            }
+        }, series.map((x, i) => h("span", {
+            key: i,
+            style: {
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 4
+            }
+        }, h("i", {
+            style: {
+                width: 10,
+                height: 10,
+                borderRadius: 3,
+                background: x.color || SG_AN_COL[i % 8],
+                display: "inline-block"
+            }
+        }), x.name))) : null;
+        if (type === "donut") {
+            let vals = series[0].values.map(v => Math.max(0, v || 0)),
+                tot = vals.reduce((a, b) => a + b, 0),
+                cx = 100,
+                cy = 100,
+                R = 92,
+                r = 56,
+                a0 = -Math.PI / 2,
+                paths = [],
+                pt = (rad, an) => [cx + rad * Math.cos(an), cy + rad * Math.sin(an)];
+            vals.forEach((v, i) => {
+                if (v <= 0) return;
+                let fr = v / tot,
+                    a1 = a0 + fr * Math.PI * 2,
+                    col = SG_AN_COL[i % 8],
+                    tt = h("title", null, labels[i] + ": " + fmt(v) + unit);
+                if (fr >= .9999) paths.push(h("circle", {
+                    key: i,
+                    cx: cx,
+                    cy: cy,
+                    r: (R + r) / 2,
+                    fill: "none",
+                    stroke: col,
+                    strokeWidth: R - r
+                }, tt));
+                else {
+                    let lg = fr > .5 ? 1 : 0,
+                        [p0x, p0y] = pt(R, a0),
+                        [p1x, p1y] = pt(R, a1),
+                        [p2x, p2y] = pt(r, a1),
+                        [p3x, p3y] = pt(r, a0);
+                    paths.push(h("path", {
+                        key: i,
+                        d: `M${p0x} ${p0y}A${R} ${R} 0 ${lg} 1 ${p1x} ${p1y}L${p2x} ${p2y}A${r} ${r} 0 ${lg} 0 ${p3x} ${p3y}Z`,
+                        fill: col
+                    }, tt))
+                }
+                a0 = a1
+            });
+            return h("div", {
+                style: {
+                    display: "flex",
+                    flexWrap: "wrap",
+                    alignItems: "center",
+                    gap: 16,
+                    justifyContent: "center"
+                }
+            }, h("svg", {
+                viewBox: "0 0 200 200",
+                width: 190,
+                height: 190
+            }, paths, h("text", {
+                x: cx,
+                y: cy - 2,
+                textAnchor: "middle",
+                fontSize: 15,
+                fontWeight: 700,
+                fill: "#44403c"
+            }, fmt(tot)), h("text", {
+                x: cx,
+                y: cy + 14,
+                textAnchor: "middle",
+                fontSize: 9,
+                fill: "#a8a29e"
+            }, "total" + (unit ? " (" + unit.trim() + ")" : ""))), h("div", {
+                style: {
+                    fontSize: 12,
+                    minWidth: 150
+                }
+            }, vals.map((v, i) => v > 0 && h("div", {
+                key: i,
+                style: {
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 6,
+                    padding: "2px 0"
+                }
+            }, h("i", {
+                style: {
+                    width: 10,
+                    height: 10,
+                    borderRadius: 3,
+                    background: SG_AN_COL[i % 8],
+                    display: "inline-block"
+                }
+            }), h("span", {
+                style: {
+                    flex: 1,
+                    color: "#44403c"
+                }
+            }, trunc(labels[i], 22)), h("b", null, fmt(v), unit), h("span", {
+                style: {
+                    color: "#a8a29e",
+                    width: 38,
+                    textAlign: "right"
+                }
+            }, Math.round(v / tot * 100), "%")))))
+        }
+        let W = 640,
+            n = labels.length,
+            m = series.length;
+        if (type === "hbar") {
+            let lw = 100,
+                rw = 60,
+                rh = 14 * m + 12,
+                Hh = n * rh + 10,
+                mx = Math.max(...all, .0001),
+                iw = W - lw - rw,
+                els = [];
+            labels.forEach((lb2, i) => {
+                els.push(h("text", {
+                    key: "l" + i,
+                    x: lw - 6,
+                    y: 8 + i * rh + rh / 2 + 3,
+                    textAnchor: "end",
+                    fontSize: 11,
+                    fill: "#57534e"
+                }, trunc(lb2, 16)));
+                series.forEach((x, si) => {
+                    let v = x.values[i];
+                    if (typeof v !== "number") return;
+                    let bw = Math.max(1, v / mx * iw),
+                        by = 8 + i * rh + 4 + si * 14;
+                    els.push(h("rect", {
+                        key: "b" + i + "_" + si,
+                        x: lw,
+                        y: by,
+                        width: bw,
+                        height: 11,
+                        rx: 3,
+                        fill: x.color || SG_AN_COL[si % 8]
+                    }, h("title", null, lb2 + " \u2014 " + x.name + ": " + fmt(v) + unit)), h("text", {
+                        key: "t" + i + "_" + si,
+                        x: lw + bw + 4,
+                        y: by + 9,
+                        fontSize: 10,
+                        fill: "#44403c"
+                    }, fmt(v) + unit))
+                })
+            });
+            return h("div", null, legend, h("svg", {
+                viewBox: `0 0 ${W} ${Hh}`,
+                width: "100%",
+                style: {
+                    display: "block"
+                }
+            }, els))
+        }
+        let Hh = 240,
+            pl = 40,
+            pr = 12,
+            pt2 = 16,
+            pb = 30,
+            iw = W - pl - pr,
+            ih = Hh - pt2 - pb,
+            mx0 = Math.max(...all, .0001),
+            pw = Math.pow(10, Math.floor(Math.log10(mx0 / 4))),
+            mm = mx0 / 4 / pw,
+            step = (mm <= 1 ? 1 : mm <= 2 ? 2 : mm <= 5 ? 5 : 10) * pw,
+            mx = Math.ceil(mx0 / step) * step || step,
+            ticks = [];
+        for (let v = 0; v <= mx + 1e-9; v += step) ticks.push(v);
+        let isBar = type === "bar",
+            xp = i => isBar ? pl + (i + .5) * iw / n : n === 1 ? pl + iw / 2 : pl + i * iw / (n - 1),
+            yp = v => pt2 + ih - v / mx * ih,
+            every = Math.ceil(n / 8),
+            showVal = n * m <= 14,
+            els = [];
+        ticks.forEach((tv, i) => els.push(h("g", {
+            key: "g" + i
+        }, h("line", {
+            x1: pl,
+            x2: W - pr,
+            y1: yp(tv),
+            y2: yp(tv),
+            stroke: "#e7e5e4",
+            strokeDasharray: "3 3"
+        }), h("text", {
+            x: pl - 5,
+            y: yp(tv) + 3,
+            textAnchor: "end",
+            fontSize: 10,
+            fill: "#a8a29e"
+        }, fmt(tv)))));
+        labels.forEach((lb2, i) => i % every === 0 && els.push(h("text", {
+            key: "x" + i,
+            x: xp(i),
+            y: Hh - 10,
+            textAnchor: "middle",
+            fontSize: 10,
+            fill: "#78716c"
+        }, trunc(lb2, 10))));
+        series.forEach((x, si) => {
+            let col = x.color || SG_AN_COL[si % 8];
+            if (isBar) {
+                let band = iw / n,
+                    bw = Math.min(40, band * .72 / m);
+                x.values.forEach((v, i) => {
+                    if (typeof v !== "number") return;
+                    let bx = xp(i) - bw * m / 2 + si * bw,
+                        by = yp(v);
+                    els.push(h("rect", {
+                        key: "r" + si + "_" + i,
+                        x: bx,
+                        y: by,
+                        width: Math.max(1, bw - 1),
+                        height: Math.max(0, pt2 + ih - by),
+                        rx: 2,
+                        fill: col
+                    }, h("title", null, labels[i] + " \u2014 " + x.name + ": " + fmt(v) + unit)));
+                    showVal && els.push(h("text", {
+                        key: "v" + si + "_" + i,
+                        x: bx + bw / 2,
+                        y: by - 3,
+                        textAnchor: "middle",
+                        fontSize: 9,
+                        fill: "#44403c"
+                    }, fmt(v)))
+                })
+            } else {
+                let segs = [],
+                    cur = [];
+                x.values.forEach((v, i) => {
+                    typeof v === "number" ? cur.push([xp(i), yp(v), i, v]) : cur.length && (segs.push(cur), cur = [])
+                });
+                cur.length && segs.push(cur);
+                segs.forEach((sg, k) => {
+                    let d = sg.map((p, j) => (j ? "L" : "M") + p[0] + " " + p[1]).join("");
+                    type === "area" && els.push(h("path", {
+                        key: "a" + si + "_" + k,
+                        d: d + `L${sg[sg.length-1][0]} ${pt2+ih}L${sg[0][0]} ${pt2+ih}Z`,
+                        fill: col,
+                        opacity: .18
+                    }));
+                    els.push(h("path", {
+                        key: "p" + si + "_" + k,
+                        d: d,
+                        fill: "none",
+                        stroke: col,
+                        strokeWidth: 2
+                    }));
+                    sg.forEach(p => {
+                        els.push(h("circle", {
+                            key: "c" + si + "_" + p[2],
+                            cx: p[0],
+                            cy: p[1],
+                            r: 3,
+                            fill: "#fff",
+                            stroke: col,
+                            strokeWidth: 2
+                        }, h("title", null, labels[p[2]] + " \u2014 " + x.name + ": " + fmt(p[3]) + unit)));
+                        showVal && els.push(h("text", {
+                            key: "t" + si + "_" + p[2],
+                            x: p[0],
+                            y: p[1] - 7,
+                            textAnchor: "middle",
+                            fontSize: 9,
+                            fill: "#44403c"
+                        }, fmt(p[3])))
+                    })
+                })
+            }
+        });
+        return h("div", null, legend, h("svg", {
+            viewBox: `0 0 ${W} ${Hh}`,
+            width: "100%",
+            style: {
+                display: "block"
+            }
+        }, els))
+    }
+
+    function SgAnalytics({
+        styles: styles,
+        lines: lines,
+        entries: entries,
+        date: date
+    }) {
+        let h = f.default.createElement,
+            ymd = d => d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0"),
+            addDays = (sd, k) => {
+                let d = new Date(sd + "T00:00:00");
+                return d.setDate(d.getDate() + k), ymd(d)
+            },
+            end0 = date || vr(),
+            [from, setFrom] = (0, f.useState)(() => addDays(end0, -6)),
+            [to, setTo] = (0, f.useState)(end0),
+            [rep, setRep] = (0, f.useState)("eff"),
+            [view, setView] = (0, f.useState)("trend"),
+            [ctype, setCtype] = (0, f.useState)("line"),
+            [selLine, setSelLine] = (0, f.useState)("all"),
+            [selDept, setSelDept] = (0, f.useState)("all"),
+            [msg, setMsg] = (0, f.useState)(""),
+            REPS = [
+                ["eff", "Efficiency"],
+                ["dept", "Department"],
+                ["line", "Line-wise"],
+                ["dhu", "DHU"],
+                ["rej", "Rejection"],
+                ["ot", "OT"],
+                ["loss", "Loss %"],
+                ["spl", "SPL M/C Util"],
+                ["top3", "Top 3"]
+            ],
+            fac = (() => {
+                try {
+                    return JSON.parse(localStorage.getItem("sgps-current-factory"))
+                } catch {
+                    return null
+                }
+            })(),
+            C = (0, f.useMemo)(() => {
+                let lo = from <= to ? from : to,
+                    hi = from <= to ? to : from,
+                    dates = [],
+                    cur = lo,
+                    g = 0;
+                for (; cur <= hi && g < 366;) dates.push(cur), cur = addDays(cur, 1), g++;
+                let ein = (entries || []).filter(e => e.date >= lo && e.date <= hi),
+                    sum = (d, ty) => ein.filter(e => e.date === d && e.type === ty).reduce((a, e) => a + oe(e.qty), 0),
+                    pct = (a, b) => b > 0 ? a / b * 100 : null,
+                    labels = dates.map(d => lr(d)),
+                    effDay = dates.map(d => {
+                        let x = Sy(d, styles, ein);
+                        return x.planned > 0 ? x.efficiencyPct : null
+                    }),
+                    lineStats = (lines || []).map(ln => {
+                        let pl = 0,
+                            pr = 0,
+                            qty = 0,
+                            per = dates.map(d => {
+                                let x = DOe(ln, d, styles, ein);
+                                return x.sewQty > 0 && x.plannedMinutes > 0 ? (pl += x.plannedMinutes, pr += x.producedMinutes, qty += x.sewQty, x.efficiencyPct) : null
+                            });
+                        let stm = {};
+                        ein.forEach(e => {
+                            if (e.lineId === ln.id && e.type === "sewing") {
+                                let o = stm[e.styleId] || (stm[e.styleId] = {
+                                    qty: 0,
+                                    ds: new Set
+                                });
+                                o.qty += oe(e.qty);
+                                o.ds.add(e.date)
+                            }
+                        });
+                        return {
+                            name: ln.lineNo || "Line",
+                            id: ln.id,
+                            eff: pl > 0 ? pr / pl * 100 : null,
+                            qty: qty,
+                            per: per,
+                            sty: Object.entries(stm).map(([id, o]) => ({
+                                name: ((styles || []).find(x => x.id === id) || {}).styleNo || "Style",
+                                qty: o.qty,
+                                days: o.ds.size
+                            })).sort((a, b) => b.qty - a.qty)
+                        }
+                    }),
+                    deptMap = {};
+                dates.forEach((d, di) => {
+                    (styles || []).forEach(st => (st.departments || []).forEach(sd => {
+                        let meta = VA.find(c => c.key === sd.key);
+                        if (!meta) return;
+                        let q = ein.filter(c => c.styleId === st.id && c.type === meta.entryType && c.date === d).reduce((a, c) => a + oe(c.qty), 0);
+                        if (q <= 0) return;
+                        let o = deptMap[sd.key] || (deptMap[sd.key] = {
+                            name: meta.label,
+                            pl: 0,
+                            pr: 0,
+                            qty: 0,
+                            st: {},
+                            dl: dates.map(() => ({
+                                pl: 0,
+                                pr: 0
+                            }))
+                        });
+                        let plm = oe(sd.manpower) * Gh + x3(st.id, meta.entryType, ein, d),
+                            prm = q * oe(sd.smv);
+                        o.pl += plm;
+                        o.pr += prm;
+                        o.qty += q;
+                        o.dl[di].pl += plm;
+                        o.dl[di].pr += prm;
+                        let so = o.st[st.id] || (o.st[st.id] = {
+                            pl: 0,
+                            pr: 0,
+                            qty: 0
+                        });
+                        so.pl += plm;
+                        so.pr += prm;
+                        so.qty += q
+                    }))
+                });
+                let depts = Object.entries(deptMap).map(([dk, o]) => ({
+                        key: dk,
+                        sty: Object.entries(o.st).map(([id, x]) => ({
+                            name: ((styles || []).find(z => z.id === id) || {}).styleNo || "Style",
+                            eff: pct(x.pr, x.pl),
+                            qty: x.qty
+                        })).sort((a, b) => b.qty - a.qty),
+                        name: o.name,
+                        eff: pct(o.pr, o.pl),
+                        qty: o.qty,
+                        per: o.dl.map(x => pct(x.pr, x.pl))
+                    })),
+                    dhuDay = dates.map(d => pct(sum(d, "rework") + sum(d, "sewingReject"), sum(d, "sewing"))),
+                    dhuLine = (lines || []).map(ln => {
+                        let q = ein.filter(e => e.lineId === ln.id && e.type === "sewing").reduce((a, e) => a + oe(e.qty), 0),
+                            dfc = ein.filter(e => e.lineId === ln.id && (e.type === "rework" || e.type === "sewingReject")).reduce((a, e) => a + oe(e.qty), 0);
+                        return {
+                            name: ln.lineNo || "Line",
+                            dhu: pct(dfc, q),
+                            defects: dfc,
+                            qty: q
+                        }
+                    }),
+                    rejC = dates.map(d => pct(sum(d, "cuttingReject"), sum(d, "cutting"))),
+                    rejS = dates.map(d => pct(sum(d, "sewingReject") + sum(d, "sewingLoss"), sum(d, "sewing"))),
+                    rejT = [
+                        ["Cutting Reject", "cuttingReject"],
+                        ["Sewing Reject", "sewingReject"],
+                        ["Sewing Loss", "sewingLoss"]
+                    ].map(([nm, ty]) => ({
+                        name: nm,
+                        v: ein.filter(e => e.type === ty).reduce((a, e) => a + oe(e.qty), 0)
+                    })),
+                    otE = ein.filter(e => e.type === "ot"),
+                    otDay = dates.map(d => otE.filter(e => e.date === d).reduce((a, e) => a + oe(e.otManpower) * oe(e.otHours), 0)),
+                    otDept = {};
+                otE.forEach(e => {
+                    let k = e.dept || "\u2014";
+                    otDept[k] = (otDept[k] || 0) + oe(e.otManpower) * oe(e.otHours)
+                });
+                let lossRows = [];
+                try {
+                    lossRows = sgEffBuild(styles, ein, lines, window.__sgLinePlans || [], "Factory").map(r => ({
+                        ...r,
+                        _c: sgEffCalc(r)
+                    }))
+                } catch {}
+                let lossAgg = lossRows.length ? sgEffAgg(lossRows) : null,
+                    lossDay = dates.map(d => {
+                        let rs = lossRows.filter(r => r.d === d);
+                        if (!rs.length) return null;
+                        let a = sgEffAgg(rs);
+                        return {
+                            fac: a.pct(a.fac) * 100,
+                            int: a.pct(a.int) * 100,
+                            ext: a.pct(a.ext) * 100,
+                            otl: a.pct(a.otl) * 100
+                        }
+                    }),
+                    lossCat = lossAgg ? SG_EFF_LOSS.map(([k, nm]) => ({
+                        name: nm,
+                        min: lossAgg.L[k],
+                        v: lossAgg.pct(lossAgg.L[k]) * 100
+                    })) : [],
+                    spl = (window.__sgSplLogs || []).filter(l => (!fac || l.factoryId === fac) && l.date >= lo && l.date <= hi).map(l => {
+                        let man = oe(l.operators) + oe(l.helpers),
+                            avail = man * oe(l.hours) * 60;
+                        return {
+                            ...l,
+                            avail: avail,
+                            used: oe(l.achieved) * oe(l.sam),
+                            tg: oe(l.target),
+                            ac: oe(l.achieved)
+                        }
+                    }),
+                    splDay = dates.map(d => {
+                        let ls = spl.filter(l => l.date === d);
+                        return ls.length ? {
+                            u: pct(ls.reduce((a, l) => a + l.used, 0), ls.reduce((a, l) => a + l.avail, 0)),
+                            a: pct(ls.reduce((a, l) => a + l.ac, 0), ls.reduce((a, l) => a + l.tg, 0))
+                        } : null
+                    }),
+                    splM = {};
+                spl.forEach(l => {
+                    let o = splM[l.machineNo] || (splM[l.machineNo] = {
+                        name: l.machineNo || "\u2014",
+                        used: 0,
+                        avail: 0,
+                        ac: 0,
+                        tg: 0
+                    });
+                    o.used += l.used;
+                    o.avail += l.avail;
+                    o.ac += l.ac;
+                    o.tg += l.tg
+                });
+                let splMach = Object.values(splM).map(o => ({
+                        name: o.name,
+                        u: pct(o.used, o.avail),
+                        a: pct(o.ac, o.tg),
+                        ac: o.ac
+                    })).sort((a, b) => String(a.name).localeCompare(String(b.name), void 0, {
+                        numeric: !0
+                    })),
+                    sty = {},
+                    dtR = {};
+                ein.forEach(e => {
+                    if (e.type === "sewing") sty[e.styleId] = (sty[e.styleId] || 0) + oe(e.qty);
+                    if (e.type === "downtime") {
+                        let k = (e.reason || "Unspecified").trim() || "Unspecified";
+                        dtR[k] = (dtR[k] || 0) + oe(e.qty)
+                    }
+                });
+                let sMap = new Map((styles || []).map(x => [x.id, x]));
+                return {
+                    dates: dates,
+                    labels: labels,
+                    effDay: effDay,
+                    lineStats: lineStats,
+                    depts: depts,
+                    dhuDay: dhuDay,
+                    dhuLine: dhuLine,
+                    rejC: rejC,
+                    rejS: rejS,
+                    rejT: rejT,
+                    otDay: otDay,
+                    otDept: otDept,
+                    lossDay: lossDay,
+                    lossCat: lossCat,
+                    splDay: splDay,
+                    splMach: splMach,
+                    topLines: lineStats.filter(x => x.eff != null).sort((a, b) => b.eff - a.eff).slice(0, 3),
+                    topStyles: Object.entries(sty).map(([id, v]) => ({
+                        name: (sMap.get(id) || {}).styleNo || "Style",
+                        v: v
+                    })).sort((a, b) => b.v - a.v).slice(0, 3),
+                    topLoss: lossCat.filter(x => x.v > 0).sort((a, b) => b.v - a.v).slice(0, 3),
+                    topDt: Object.entries(dtR).map(([k, v]) => ({
+                        name: k,
+                        v: v
+                    })).sort((a, b) => b.v - a.v).slice(0, 3)
+                }
+            }, [from, to, styles, lines, entries]),
+            R = (() => {
+                let L = C.labels,
+                    one = (name, values, color) => [{
+                        name: name,
+                        values: values,
+                        color: color
+                    }],
+                    by = view === "trend";
+                switch (rep) {
+                    case "eff":
+                        return by ? {
+                            labels: L,
+                            series: one("Factory Eff %", C.effDay),
+                            unit: "%",
+                            note: "Efficiency % = produced SMV minutes \u00F7 available minutes (manpower \u00D7 work minutes + OT)."
+                        } : {
+                            labels: C.lineStats.map(x => x.name),
+                            series: one("Eff %", C.lineStats.map(x => x.eff)),
+                            unit: "%",
+                            extra: [{
+                                name: "Sewn qty",
+                                values: C.lineStats.map(x => x.qty)
+                            }],
+                            note: "Line efficiency over the selected range (weighted by available minutes)."
+                        };
+                    case "dept":
+                        if (selDept !== "all") {
+                            let d = C.depts.find(x => x.key === selDept),
+                                nm = (VA.find(x => x.key === selDept) || {}).label || selDept;
+                            if (!d) return {
+                                labels: L,
+                                series: one(nm + " Eff %", L.map(() => null)),
+                                unit: "%",
+                                note: "Intha range-la " + nm + " department data illa."
+                            };
+                            return by ? {
+                                labels: L,
+                                series: one(nm + " Eff %", d.per),
+                                unit: "%",
+                                note: nm + " department efficiency per day."
+                            } : {
+                                labels: d.sty.map(x => x.name),
+                                series: one("Eff %", d.sty.map(x => x.eff)),
+                                unit: "%",
+                                extra: [{
+                                    name: "Output qty",
+                                    values: d.sty.map(x => x.qty)
+                                }],
+                                note: nm + " department \u2014 style-wise efficiency."
+                            }
+                        }
+                        return by ? {
+                            labels: L,
+                            series: C.depts.map((d, i) => ({
+                                name: d.name,
+                                values: d.per
+                            })),
+                            unit: "%",
+                            note: "Department efficiency from style department SMV & manpower (same basis as Style-wise Department Efficiency)."
+                        } : {
+                            labels: C.depts.map(d => d.name),
+                            series: one("Eff %", C.depts.map(d => d.eff)),
+                            unit: "%",
+                            extra: [{
+                                name: "Output qty",
+                                values: C.depts.map(d => d.qty)
+                            }],
+                            note: "Department efficiency over the selected range."
+                        };
+                    case "line":
+                        if (selLine !== "all") {
+                            let ls = C.lineStats.find(x => x.id === selLine);
+                            if (ls) return by ? {
+                                labels: L,
+                                series: one(ls.name + " Eff %", ls.per),
+                                unit: "%",
+                                note: ls.name + " efficiency per day."
+                            } : {
+                                labels: ls.sty.map(x => x.name),
+                                series: one("Sewn qty", ls.sty.map(x => x.qty)),
+                                unit: " pcs",
+                                extra: [{
+                                    name: "Days run",
+                                    values: ls.sty.map(x => x.days)
+                                }],
+                                note: ls.name + " \u2014 styles run in the selected range."
+                            }
+                        }
+                        return by ? {
+                            labels: L,
+                            series: C.lineStats.slice(0, 8).map(x => ({
+                                name: x.name,
+                                values: x.per
+                            })),
+                            unit: "%",
+                            note: "Line efficiency per day (first 8 lines)."
+                        } : {
+                            labels: C.lineStats.map(x => x.name),
+                            series: one("Eff %", C.lineStats.map(x => x.eff)),
+                            unit: "%",
+                            extra: [{
+                                name: "Sewn qty",
+                                values: C.lineStats.map(x => x.qty)
+                            }],
+                            note: "Line-wise efficiency and sewn quantity for the range."
+                        };
+                    case "dhu":
+                        return by ? {
+                            labels: L,
+                            series: one("DHU", C.dhuDay, "#ef4444"),
+                            unit: "",
+                            note: "DHU = (Rework + Sewing reject pcs) \u00F7 Sewing output \u00D7 100."
+                        } : {
+                            labels: C.dhuLine.map(x => x.name),
+                            series: one("DHU", C.dhuLine.map(x => x.dhu), "#ef4444"),
+                            unit: "",
+                            extra: [{
+                                name: "Defects",
+                                values: C.dhuLine.map(x => x.defects)
+                            }, {
+                                name: "Sewn",
+                                values: C.dhuLine.map(x => x.qty)
+                            }],
+                            note: "DHU = (Rework + Sewing reject pcs) \u00F7 Sewing output \u00D7 100, line-wise."
+                        };
+                    case "rej":
+                        return by ? {
+                            labels: L,
+                            series: [{
+                                name: "Cutting Rej %",
+                                values: C.rejC,
+                                color: "#f59e0b"
+                            }, {
+                                name: "Sewing Rej %",
+                                values: C.rejS,
+                                color: "#ef4444"
+                            }],
+                            unit: "%",
+                            note: "Cutting rej % = Cutting reject \u00F7 Cutting qty. Sewing rej % = (Sewing reject + Sewing loss) \u00F7 Sewing qty."
+                        } : {
+                            labels: C.rejT.map(x => x.name),
+                            series: one("Pcs", C.rejT.map(x => x.v), "#ef4444"),
+                            unit: " pcs",
+                            note: "Rejected pcs by type in the selected range."
+                        };
+                    case "ot":
+                        return by ? {
+                            labels: L,
+                            series: one("OT man-hours", C.otDay, "#6366f1"),
+                            unit: " h",
+                            note: "OT man-hours = OT manpower \u00D7 OT hours (from OT Entry)."
+                        } : {
+                            labels: Object.keys(C.otDept),
+                            series: one("OT man-hours", Object.values(C.otDept), "#6366f1"),
+                            unit: " h",
+                            note: "OT man-hours by department."
+                        };
+                    case "loss":
+                        return by ? {
+                            labels: L,
+                            series: [{
+                                name: "Factory loss %",
+                                values: C.lossDay.map(x => x && x.fac),
+                                color: "#ef4444"
+                            }, {
+                                name: "Internal %",
+                                values: C.lossDay.map(x => x && x.int),
+                                color: "#f59e0b"
+                            }, {
+                                name: "External %",
+                                values: C.lossDay.map(x => x && x.ext),
+                                color: "#0ea5e9"
+                            }, {
+                                name: "OT loss %",
+                                values: C.lossDay.map(x => x && x.otl),
+                                color: "#a855f7"
+                            }],
+                            unit: "%",
+                            note: "Loss % = loss minutes \u00F7 available minutes. Built from Downtime / Rework entries (reason auto-mapped)."
+                        } : {
+                            labels: C.lossCat.map(x => x.name),
+                            series: one("Loss %", C.lossCat.map(x => x.v), "#ef4444"),
+                            unit: "%",
+                            extra: [{
+                                name: "Minutes",
+                                values: C.lossCat.map(x => x.min)
+                            }],
+                            note: "Loss % by category (share of available minutes)."
+                        };
+                    case "spl":
+                        return by ? {
+                            labels: L,
+                            series: [{
+                                name: "Utilization %",
+                                values: C.splDay.map(x => x && x.u),
+                                color: "#0f766e"
+                            }, {
+                                name: "Target ach %",
+                                values: C.splDay.map(x => x && x.a),
+                                color: "#f59e0b"
+                            }],
+                            unit: "%",
+                            note: "Utilization % = achieved \u00D7 SAM \u00F7 ((operators + helpers) \u00D7 hours \u00D7 60). From Special Machine daily log."
+                        } : {
+                            labels: C.splMach.map(x => x.name),
+                            series: [{
+                                name: "Utilization %",
+                                values: C.splMach.map(x => x.u),
+                                color: "#0f766e"
+                            }, {
+                                name: "Target ach %",
+                                values: C.splMach.map(x => x.a),
+                                color: "#f59e0b"
+                            }],
+                            unit: "%",
+                            extra: [{
+                                name: "Achieved pcs",
+                                values: C.splMach.map(x => x.ac)
+                            }],
+                            note: "Special machine-wise utilization for the range."
+                        };
+                    default:
+                        return null
+                }
+            })(),
+            allowed = rep === "top3" ? ["bar", "hbar", "donut"] : view === "trend" ? ["line", "area", "bar"] : R && R.series.length === 1 ? ["bar", "hbar", "donut", "line"] : ["bar", "hbar", "line"],
+            ct = allowed.includes(ctype) ? ctype : allowed[0],
+            CT = {
+                line: "Line",
+                area: "Area",
+                bar: "Bar",
+                hbar: "H-Bar",
+                donut: "Donut"
+            },
+            chip = (on, label, onClick, key) => h("button", {
+                key: key || label,
+                onClick: onClick,
+                style: {
+                    fontSize: 11,
+                    fontWeight: 700,
+                    padding: "5px 10px",
+                    borderRadius: 8,
+                    border: 0,
+                    cursor: "pointer",
+                    background: on ? "#f59e0b" : "#f5f5f4",
+                    color: on ? "#1c1917" : "#78716c"
+                }
+            }, label),
+            setRange = k => {
+                let t = date || vr();
+                setTo(t);
+                setFrom(addDays(t, -(k - 1)))
+            },
+            inp = {
+                border: "1px solid #e7e5e4",
+                borderRadius: 8,
+                padding: "5px 8px",
+                fontSize: 12,
+                background: "#fff"
+            },
+            fm = v => typeof v === "number" && isFinite(v) ? (Math.round(v * 10) / 10).toLocaleString("en-IN") : "\u2014",
+            tableRows = R ? R.labels.map((l, i) => [l, ...R.series.map(x => x.values[i]), ...(R.extra || []).map(x => x.values[i])]) : [],
+            tableHead = R ? ["", ...R.series.map(x => x.name), ...(R.extra || []).map(x => x.name)] : [],
+            doExport = () => {
+                try {
+                    let wb = $a.book_new(),
+                        rows;
+                    if (rep === "top3") rows = [
+                        ["Top 3 Lines (Eff %)"], ...C.topLines.map(x => [x.name, x.eff]), [],
+                        ["Top 3 Styles (Sewn qty)"], ...C.topStyles.map(x => [x.name, x.v]), [],
+                        ["Top 3 Loss categories (%)"], ...C.topLoss.map(x => [x.name, x.v]), [],
+                        ["Top 3 Downtime reasons (min)"], ...C.topDt.map(x => [x.name, x.v])
+                    ];
+                    else rows = [tableHead, ...tableRows];
+                    let ws = $a.aoa_to_sheet([
+                        ["Analytics \u2014 " + REPS.find(x => x[0] === rep)[1] + (rep === "top3" ? "" : " (" + (view === "trend" ? "Trend" : "Breakdown") + ")")],
+                        ["From " + from + " to " + to],
+                        [], ...rows
+                    ]);
+                    $a.book_append_sheet(wb, ws, "Analytics");
+                    let fn = "SGPS_Analytics_" + rep + "_" + from + "_to_" + to + ".xlsx";
+                    TD(wb, fn);
+                    setMsg("Excel downloaded: " + fn)
+                } catch (e) {
+                    setMsg("Export failed: " + (e && e.message || e))
+                }
+            },
+            panel = (title, items, unit) => h("div", {
+                key: title,
+                style: {
+                    border: "1px solid #e7e5e4",
+                    borderRadius: 12,
+                    padding: 10
+                }
+            }, h("div", {
+                style: {
+                    fontSize: 11,
+                    fontWeight: 800,
+                    color: "#57534e",
+                    textTransform: "uppercase",
+                    letterSpacing: ".04em",
+                    marginBottom: 4
+                }
+            }, title), sgAnChart({
+                type: ct,
+                labels: items.map(x => x.name),
+                series: [{
+                    name: title,
+                    values: items.map(x => x.eff != null ? x.eff : x.v)
+                }],
+                unit: unit
+            }));
+        return h("div", {
+            className: "rounded-2xl border border-stone-200 bg-white p-4 space-y-3",
+            id: "sg-analytics"
+        }, h("div", {
+            style: {
+                display: "flex",
+                flexWrap: "wrap",
+                alignItems: "center",
+                justifyContent: "space-between",
+                gap: 8
+            }
+        }, h("h4", {
+            className: "text-xs font-bold text-stone-500 uppercase tracking-wide"
+        }, "Analytics \u2014 range & chart"), h("div", {
+            style: {
+                display: "flex",
+                gap: 4,
+                flexWrap: "wrap"
+            }
+        }, [7, 14, 30].map(k => chip(to === (date || vr()) && from === addDays(date || vr(), -(k - 1)), k + "D", () => setRange(k), "r" + k)))), h("div", {
+            style: {
+                display: "flex",
+                flexWrap: "wrap",
+                gap: 8,
+                alignItems: "center",
+                fontSize: 11,
+                color: "#78716c",
+                fontWeight: 700
+            }
+        }, h("label", null, "FROM ", h("input", {
+            type: "date",
+            value: from,
+            onChange: e => setFrom(e.target.value || from),
+            style: inp
+        })), h("label", null, "TO ", h("input", {
+            type: "date",
+            value: to,
+            onChange: e => setTo(e.target.value || to),
+            style: inp
+        })), h("span", {
+            style: {
+                fontWeight: 500
+            }
+        }, C.dates.length, " day(s)")), h("div", {
+            style: {
+                display: "flex",
+                flexWrap: "wrap",
+                gap: 4
+            }
+        }, REPS.map(([k, l]) => chip(rep === k, l, () => {
+            setRep(k);
+            setMsg("")
+        }))), (rep === "line" || rep === "dept") && h("div", {
+            style: {
+                display: "flex",
+                gap: 6,
+                alignItems: "center"
+            }
+        }, h("span", {
+            style: {
+                fontSize: 10,
+                color: "#a8a29e",
+                fontWeight: 700
+            }
+        }, rep === "line" ? "LINE" : "DEPARTMENT"), rep === "line" ? h("select", {
+            value: C.lineStats.some(x => x.id === selLine) ? selLine : "all",
+            onChange: e => setSelLine(e.target.value),
+            style: inp
+        }, h("option", {
+            value: "all"
+        }, "All lines"), C.lineStats.map(x => h("option", {
+            key: x.id,
+            value: x.id
+        }, x.name))) : h("select", {
+            value: selDept,
+            onChange: e => setSelDept(e.target.value),
+            style: inp
+        }, h("option", {
+            value: "all"
+        }, "All departments"), VA.map(x => h("option", {
+            key: x.key,
+            value: x.key
+        }, x.label)))), h("div", {
+            style: {
+                display: "flex",
+                flexWrap: "wrap",
+                gap: 12,
+                alignItems: "center"
+            }
+        }, rep !== "top3" && h("div", {
+            style: {
+                display: "flex",
+                gap: 4,
+                alignItems: "center"
+            }
+        }, h("span", {
+            style: {
+                fontSize: 10,
+                color: "#a8a29e",
+                fontWeight: 700
+            }
+        }, "VIEW"), chip(view === "trend", "By date", () => setView("trend")), chip(view === "break", "Breakdown", () => setView("break"))), h("div", {
+            style: {
+                display: "flex",
+                gap: 4,
+                alignItems: "center",
+                flexWrap: "wrap"
+            }
+        }, h("span", {
+            style: {
+                fontSize: 10,
+                color: "#a8a29e",
+                fontWeight: 700
+            }
+        }, "CHART"), allowed.map(k => chip(ct === k, CT[k], () => setCtype(k)))), h("button", {
+            onClick: doExport,
+            style: {
+                marginLeft: "auto",
+                fontSize: 11,
+                fontWeight: 700,
+                padding: "5px 10px",
+                borderRadius: 8,
+                border: "1px solid #e7e5e4",
+                background: "#fff",
+                cursor: "pointer"
+            }
+        }, "\u2B07 Excel")), rep === "top3" ? h("div", {
+            style: {
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fit,minmax(260px,1fr))",
+                gap: 10
+            }
+        }, panel("Top 3 Lines \u2014 Eff %", C.topLines, "%"), panel("Top 3 Styles \u2014 Sewn qty", C.topStyles, " pcs"), panel("Top 3 Losses \u2014 %", C.topLoss, "%"), panel("Top 3 Downtime \u2014 min", C.topDt, " min")) : R && h(f.default.Fragment, null, sgAnChart({
+            type: ct,
+            labels: R.labels,
+            series: R.series,
+            unit: R.unit
+        }), h("div", {
+            style: {
+                overflowX: "auto",
+                maxHeight: 220,
+                overflowY: "auto",
+                border: "1px solid #f5f5f4",
+                borderRadius: 10
+            }
+        }, h("table", {
+            style: {
+                width: "100%",
+                borderCollapse: "collapse",
+                fontSize: 12
+            }
+        }, h("thead", null, h("tr", null, tableHead.map((x, i) => h("th", {
+            key: i,
+            style: {
+                textAlign: i ? "right" : "left",
+                padding: "5px 8px",
+                background: "#f5f5f4",
+                color: "#57534e",
+                fontSize: 10,
+                textTransform: "uppercase",
+                position: "sticky",
+                top: 0,
+                whiteSpace: "nowrap"
+            }
+        }, x)))), h("tbody", null, tableRows.map((r, i) => h("tr", {
+            key: i
+        }, r.map((v, j) => h("td", {
+            key: j,
+            style: {
+                textAlign: j ? "right" : "left",
+                padding: "4px 8px",
+                borderTop: "1px solid #f5f5f4",
+                whiteSpace: "nowrap",
+                fontVariantNumeric: "tabular-nums"
+            }
+        }, j ? fm(v) : v))))))), h("p", {
+            style: {
+                fontSize: 10.5,
+                color: "#a8a29e",
+                margin: 0
+            }
+        }, R.note)), msg && h("p", {
+            style: {
+                fontSize: 11,
+                color: "#57534e",
+                margin: 0
+            }
+        }, msg))
+    }
+
+    function SgEffReport({
         styles: e,
         lines: t,
         entries: r
@@ -85768,58 +87947,12 @@ ${d.type==="returnable"?'<div style="font-size:11px;margin-top:6px"><b>Returnabl
             className: "text-[10px] font-semibold text-emerald-700 uppercase tracking-wide"
         }, "Best Line"), f.default.createElement("p", {
             className: "text-sm font-bold text-emerald-700 truncate"
-        }, d?.line?.lineNo || "\u2014", " ", d ? `(${d.efficiencyPct.toFixed(0)}%)` : "")))), f.default.createElement("div", {
-            className: "rounded-2xl border border-stone-200 bg-white p-4"
-        }, f.default.createElement("div", {
-            className: "flex items-center justify-between mb-3"
-        }, f.default.createElement("h4", {
-            className: "flex items-center gap-1.5 text-xs font-bold text-stone-500 uppercase tracking-wide"
-        }, f.default.createElement(_c, {
-            size: 13
-        }), " Factory Efficiency Trend"), f.default.createElement("div", {
-            className: "flex gap-1"
-        }, [7, 14, 30].map(m => f.default.createElement("button", {
-            key: m,
-            onClick: () => s(m),
-            className: `text-[11px] font-semibold px-2 py-1 rounded-md ${i===m?"bg-amber-500 text-stone-900":"bg-stone-100 text-stone-500"}`
-        }, m, "D")))), f.default.createElement("div", {
-            className: "h-48"
-        }, f.default.createElement(ff, {
-            width: "100%",
-            height: "100%"
-        }, f.default.createElement(by, {
-            data: u,
-            margin: {
-                top: 5,
-                right: 10,
-                left: -20,
-                bottom: 0
-            }
-        }, f.default.createElement($u, {
-            strokeDasharray: "3 3",
-            stroke: "#e7e5e4"
-        }), f.default.createElement(rc, {
-            dataKey: "date",
-            tick: {
-                fontSize: 10
-            }
-        }), f.default.createElement(ac, {
-            tick: {
-                fontSize: 10
-            },
-            unit: "%"
-        }), f.default.createElement(Ef, {
-            formatter: m => `${m}%`
-        }), f.default.createElement(If, {
-            type: "monotone",
-            dataKey: "pct",
-            stroke: "#f59e0b",
-            strokeWidth: 2,
-            dot: {
-                r: 3
-            },
-            name: "Efficiency %"
-        }))))), f.default.createElement("div", {
+        }, d?.line?.lineNo || "\u2014", " ", d ? `(${d.efficiencyPct.toFixed(0)}%)` : "")))), f.default.createElement(SgAnalytics, {
+            styles: e,
+            lines: t,
+            entries: r,
+            date: n
+        }), f.default.createElement("div", {
             className: "rounded-2xl border border-stone-200 bg-white p-4"
         }, f.default.createElement("h4", {
             className: "flex items-center gap-1.5 text-xs font-bold text-stone-500 uppercase tracking-wide mb-3"
@@ -86328,13 +88461,13 @@ ${d.type==="returnable"?'<div style="font-size:11px;margin-top:6px"><b>Returnabl
             className: "text-xs font-semibold rounded-lg px-3 py-1.5 bg-[#123a4a] text-[#ffb020] border border-[#1c4553] hover:border-[#ffb020]"
         }, "\u2715 Exit Full Screen")), f.default.createElement("div", {
             className: "grid grid-cols-1 sm:grid-cols-2 gap-3"
-        }, f.default.createElement(zOe, {
+        }, f.default.createElement(SgGaugeCard, {
             title: "HOURLY OUTPUT",
             subtitle: selLine ? `${x?.lineNo||""} \u2014 ${p?"latest hour":lr(h)}` : "Select a line",
             target: hourlyTgt,
             achieved: hourlyAct,
             pct: gaugePct(hourlyAct, hourlyTgt)
-        }), f.default.createElement(zOe, {
+        }), f.default.createElement(SgGaugeCard, {
             title: "DAILY OUTPUT",
             subtitle: p ? "All lines \u2014 Today" : `All lines \u2014 ${lr(h)}`,
             target: P,
@@ -87077,7 +89210,7 @@ ${d.type==="returnable"?'<div style="font-size:11px;margin-top:6px"><b>Returnabl
             name: "Downtime (hrs)"
         }))))))    }
 
-    function zOe({
+    function SgGaugeCard({
         title: e,
         subtitle: t,
         target: r,
@@ -90588,23 +92721,24 @@ ${d.type==="returnable"?'<div style="font-size:11px;margin-top:6px"><b>Returnabl
         }))))))))
     }
     async function rte(e) {
-        let t = await fetch("https://api.anthropic.com/v1/messages", {
-            method: "POST",
-            headers: {
-                "Content-Type": "application/json"
-            },
-            body: JSON.stringify({
-                model: "claude-sonnet-4-6",
-                max_tokens: 1e3,
-                messages: [{
-                    role: "user",
-                    content: e.prompt
-                }]
-            })
-        });
+        let sgBody = JSON.stringify({
+            model: "claude-sonnet-4-6",
+            max_tokens: 1e3,
+            messages: [{
+                role: "user",
+                content: e.prompt
+            }]
+        }), sgHdr = {
+            "Content-Type": "application/json"
+        }, t = null;
+        try { t = await fetch("/api/claude", { method: "POST", headers: sgHdr, body: sgBody }) } catch { t = null }
+        if (!t || t.status === 404 || t.status === 405) {
+            t = await fetch("https://api.anthropic.com/v1/messages", { method: "POST", headers: sgHdr, body: sgBody })
+        }
         if (!t.ok) {
             let a = await t.text().catch(() => "");
-            throw new Error(`AI request failed (${t.status}): ${a.slice(0,200)}`)
+            let sgHint = t.status === 401 || t.status === 403 || t.status === 404 ? " \u2014 AI proxy setup illa: Vercel la /api/claude.js deploy panni ANTHROPIC_API_KEY environment variable set pannunga." : "";
+            throw new Error(`AI request failed (${t.status}): ${a.slice(0,200)}${sgHint}`)
         }
         return ((await t.json()).content || []).map(a => a.type === "text" ? a.text : "").filter(Boolean).join(`
 `) || "(no response)"
@@ -90975,7 +93109,7 @@ Floor note: "${g.trim()}"`,
     }
 
     function pFe() {
-        let [sgBuyers, sgSetBuyers] = (0, f.useState)([]), sgBuyersSkip = (0, f.useRef)(!1), [sgPOs, sgSetPOs] = (0, f.useState)([]), sgPOsSkip = (0, f.useRef)(!1), [sgSMs, sgSetSMs] = (0, f.useState)([]), sgSMsSkip = (0, f.useRef)(!1), [sgMachines, sgSetMachines] = (0, f.useState)([]), sgMachinesSkip = (0, f.useRef)(!1), [sgPlans, sgSetPlans] = (0, f.useState)([]), sgPlansSkip = (0, f.useRef)(!1), [sgSplLogs, sgSetSplLogs] = (0, f.useState)([]), sgSplSkip = (0, f.useRef)(!1), [sgRoi, sgSetRoi] = (0, f.useState)([]), sgRoiSkip = (0, f.useRef)(!1), [sgWip, sgSetWip] = (0, f.useState)([]), sgWipSkip = (0, f.useRef)(!1), [sgDc, sgSetDc] = (0, f.useState)([]), sgDcSkip = (0, f.useRef)(!1), [sgOps, sgSetOps] = (0, f.useState)([]), sgOpsSkip = (0, f.useRef)(!1), [sgSkills, sgSetSkills] = (0, f.useState)([]), sgSkillsSkip = (0, f.useRef)(!1), [sgEmps, sgSetEmps] = (0, f.useState)([]), sgEmpsSkip = (0, f.useRef)(!1), [sgStySel, sgSetStySel] = (0, f.useState)(""), [sgMpB, sgSetMpB] = (0, f.useState)([]), sgMpSkip = (0, f.useRef)(!1), [e, t] = (0, f.useState)([]), [r, n] = (0, f.useState)([]), [a, i] = (0, f.useState)([]), [s, o] = (0, f.useState)([]), [l, u] = (0, f.useState)([]), [c, d] = (0, f.useState)([]), [h, p] = (0, f.useState)([]), [m, g] = (0, f.useState)([]), [v, x] = (0, f.useState)(null), [y, C] = (0, f.useState)(!1), [A, k] = (0, f.useState)(""), [E, b] = (0, f.useState)(null), [w, I] = (0, f.useState)("styles"), [S, P] = (0, f.useState)(!1), [D, L] = (0, f.useState)(""), [K, ae] = (0, f.useState)(null), [R, U] = (0, f.useState)(""), [W, j] = (0, f.useState)(null), [sgOBSelId, sgOBSetSelId] = (0, f.useState)(null), [sgOBSearch, sgOBSetSearch] = (0, f.useState)(""), [sgLBSelId, sgLBSetSelId] = (0, f.useState)(null), [sgLBSearch, sgLBSetSearch] = (0, f.useState)(""), [sgPESelId, sgPESetSelId] = (0, f.useState)(null), [sgPESearch, sgPESetSearch] = (0, f.useState)(""), [Y, V] = (0, f.useState)(!1), [O, Z] = (0, f.useState)(() => typeof window > "u" ? !0 : window.innerWidth >= 1024), z = ne => j(N => (N instanceof Set ? N.has(ne) : !1) ? new Set : new Set([ne])), [J, ie] = (0, f.useState)(null), xe = ne => {
+        let [sgBuyers, sgSetBuyers] = (0, f.useState)([]), sgBuyersSkip = (0, f.useRef)(!1), [sgPOs, sgSetPOs] = (0, f.useState)([]), sgPOsSkip = (0, f.useRef)(!1), [sgSMs, sgSetSMs] = (0, f.useState)([]), sgSMsSkip = (0, f.useRef)(!1), [sgMachines, sgSetMachines] = (0, f.useState)([]), sgMachinesSkip = (0, f.useRef)(!1), [sgPlans, sgSetPlans] = (0, f.useState)([]), sgPlansSkip = (0, f.useRef)(!1), [sgSplLogs, sgSetSplLogs] = (0, f.useState)([]), sgSplSkip = (0, f.useRef)(!1), [sgRoi, sgSetRoi] = (0, f.useState)([]), sgRoiSkip = (0, f.useRef)(!1), [sgEffD, sgSetEffD] = (0, f.useState)([]), sgEffDSkip = (0, f.useRef)(!1), [sgWip, sgSetWip] = (0, f.useState)([]), sgWipSkip = (0, f.useRef)(!1), [sgDc, sgSetDc] = (0, f.useState)([]), sgDcSkip = (0, f.useRef)(!1), [sgOps, sgSetOps] = (0, f.useState)([]), sgOpsSkip = (0, f.useRef)(!1), [sgSkills, sgSetSkills] = (0, f.useState)([]), sgSkillsSkip = (0, f.useRef)(!1), [sgEmps, sgSetEmps] = (0, f.useState)([]), sgEmpsSkip = (0, f.useRef)(!1), [sgStySel, sgSetStySel] = (0, f.useState)(""), [sgMpB, sgSetMpB] = (0, f.useState)([]), sgMpSkip = (0, f.useRef)(!1), [e, t] = (0, f.useState)([]), [r, n] = (0, f.useState)([]), [a, i] = (0, f.useState)([]), [s, o] = (0, f.useState)([]), [l, u] = (0, f.useState)([]), [c, d] = (0, f.useState)([]), [h, p] = (0, f.useState)([]), [m, g] = (0, f.useState)([]), [v, x] = (0, f.useState)(null), [y, C] = (0, f.useState)(!1), [A, k] = (0, f.useState)(""), [E, b] = (0, f.useState)(null), [w, I] = (0, f.useState)("styles"), [S, P] = (0, f.useState)(!1), [D, L] = (0, f.useState)(""), [K, ae] = (0, f.useState)(null), [R, U] = (0, f.useState)(""), [W, j] = (0, f.useState)(null), [sgOBSelId, sgOBSetSelId] = (0, f.useState)(null), [sgOBSearch, sgOBSetSearch] = (0, f.useState)(""), [sgLBSelId, sgLBSetSelId] = (0, f.useState)(null), [sgLBSearch, sgLBSetSearch] = (0, f.useState)(""), [sgPESelId, sgPESetSelId] = (0, f.useState)(null), [sgPESearch, sgPESetSearch] = (0, f.useState)(""), [Y, V] = (0, f.useState)(!1), [O, Z] = (0, f.useState)(() => typeof window > "u" ? !0 : window.innerWidth >= 1024), z = ne => j(N => (N instanceof Set ? N.has(ne) : !1) ? new Set : new Set([ne])), [J, ie] = (0, f.useState)(null), xe = ne => {
             ie({
                 type: "error",
                 message: ne
@@ -91009,12 +93143,38 @@ Floor note: "${g.trim()}"`,
                     return N
                 }
             }, fe = async (ne, N) => {
+                window.__sgInflight = (window.__sgInflight || 0) + 1;
+                window.__sgLastWrite = Date.now();
                 try {
-                    await NG(lb(Jee, Yee, ne), {
-                        value: N
-                    })
-                } catch (M) {
-                    xe("Save failed. " + (M?.message || ""))
+                    let sgStr = "";
+                    try { sgStr = JSON.stringify(N) || "" } catch {}
+                    let sgBytes = sgStr ? new TextEncoder().encode(sgStr).length : 0;
+                    (window.__sgSizes = window.__sgSizes || {})[ne] = sgBytes;
+                    if (sgBytes > 980000) xe("'" + ne + "' data " + Math.round(sgBytes / 1024) + " KB aagiduchu \u2014 Firestore 1 MB limit kitta. Backup edunga, pazhaya data / photos kuraiyunga.");
+                    let sgTry = 0, sgOk = !1, sgErr = null;
+                    while (sgTry < 3 && !sgOk) {
+                        try {
+                            await NG(lb(Jee, Yee, ne), {
+                                value: N
+                            });
+                            sgOk = !0
+                        } catch (M) {
+                            sgErr = M;
+                            sgTry++;
+                            if (sgTry < 3) await new Promise(r => setTimeout(r, 1500 * sgTry))
+                        }
+                    }
+                    if (sgOk) {
+                        window.__sgLastSaved = Date.now();
+                        window.__sgFailed && delete window.__sgFailed[ne]
+                    } else {
+                        (window.__sgFailed = window.__sgFailed || {})[ne] = Date.now();
+                        xe("Save failed. " + (sgErr?.message || ""))
+                    }
+                } finally {
+                    window.__sgInflight = Math.max(0, (window.__sgInflight || 1) - 1);
+                    window.__sgLastWrite = Date.now();
+                    try { window.dispatchEvent(new Event("sgps-sync")) } catch {}
                 }
             }, we = () => Promise.all([se("sgps-factories", null), se("sgps-users", null), se("sgps-styles", []), se("sgps-entries", []), se("sgps-lines-plans", {
                 lines: [],
@@ -91041,6 +93201,7 @@ Floor note: "${g.trim()}"`,
                         se("sgps-dc", []).then(v => { sgDcSkip.current = !0, sgSetDc(Array.isArray(v) ? v : []) }),
                         se("sgps-wip", []).then(v => { sgWipSkip.current = !0, sgSetWip(Array.isArray(v) ? v : []) }),
                         se("sgps-roi", []).then(v => { sgRoiSkip.current = !0, sgSetRoi(Array.isArray(v) ? v : []) }),
+                        se("sgps-effdaily", []).then(v => { sgEffDSkip.current = !0, sgSetEffD(Array.isArray(v) ? v : []) }),
                         se("sgps-spllogs", []).then(v => { sgSplSkip.current = !0, sgSetSplLogs(Array.isArray(v) ? v : []) }),
                         se("sgps-mcplans", []).then(v => { sgPlansSkip.current = !0, sgSetPlans(Array.isArray(v) ? v : []) }),
                         se("sgps-ops", []).then(v => { sgOpsSkip.current = !0, sgSetOps(Array.isArray(v) ? v : []) }),
@@ -91113,6 +93274,7 @@ Floor note: "${g.trim()}"`,
             if (!S) return;
             let N = setInterval(async () => {
                 try {
+                    if ((window.__sgInflight || 0) > 0 || Date.now() - (window.__sgLastWrite || 0) < 7000) return;
                     let {
                         facs0: M,
                         users0: H,
@@ -91128,11 +93290,11 @@ Floor note: "${g.trim()}"`,
             }, 5e3);
             return () => clearInterval(N)
         }, [S]), (0, f.useEffect)(() => {
-            !S || be.current || fe("sgps-styles", e)
+            !S || (window.__sgStyles = e, be.current) || fe("sgps-styles", e)
         }, [e, S]), (0, f.useEffect)(() => {
-            !S || be.current || fe("sgps-entries", r)
+            !S || (window.__sgEntriesSeen && window.__sgEntriesSeen(r, !be.current), be.current) || fe("sgps-entries", r)
         }, [r, S]), (0, f.useEffect)(() => {
-            !S || be.current || fe("sgps-lines-plans", {
+            !S || (window.__sgLines = a, window.__sgLinePlans = s, be.current) || fe("sgps-lines-plans", {
                 lines: a,
                 linePlans: s
             })
@@ -91202,6 +93364,7 @@ Floor note: "${g.trim()}"`,
             if (sgMachinesSkip.current) { sgMachinesSkip.current = !1; return }
             window.__sgMcLast = Date.now(), fe("sgps-machines", sgMachines)
         }, [sgMachines, S]), (0, f.useEffect)(() => {
+            window.__sgSplLogs = sgSplLogs;
             if (!S) return;
             if (sgSplSkip.current) { sgSplSkip.current = !1; return }
             window.__sgSplLast = Date.now(), fe("sgps-spllogs", sgSplLogs)
@@ -91210,6 +93373,10 @@ Floor note: "${g.trim()}"`,
             if (sgRoiSkip.current) { sgRoiSkip.current = !1; return }
             window.__sgRoiLast = Date.now(), fe("sgps-roi", sgRoi)
         }, [sgRoi, S]), (0, f.useEffect)(() => {
+            if (!S) return;
+            if (sgEffDSkip.current) { sgEffDSkip.current = !1; return }
+            window.__sgEffDLast = Date.now(), fe("sgps-effdaily", sgEffD)
+        }, [sgEffD, S]), (0, f.useEffect)(() => {
             if (!S) return;
             if (sgWipSkip.current) { sgWipSkip.current = !1; return }
             window.__sgWipLast = Date.now(), fe("sgps-wip", sgWip)
@@ -91234,6 +93401,16 @@ Floor note: "${g.trim()}"`,
                     if (Date.now() - (window.__sgWipLast || 0) < 4e3) return;
                     let M = await se("sgps-wip", null);
                     Array.isArray(M) && sgSetWip(H => JSON.stringify(H) !== JSON.stringify(M) ? (sgWipSkip.current = !0, M) : H)
+                } catch {}
+            }, 8e3);
+            return () => clearInterval(N)
+        }, [S]), (0, f.useEffect)(() => {
+            if (!S) return;
+            let N = setInterval(async () => {
+                try {
+                    if (Date.now() - (window.__sgEffDLast || 0) < 4e3) return;
+                    let M = await se("sgps-effdaily", null);
+                    Array.isArray(M) && sgSetEffD(H => JSON.stringify(H) !== JSON.stringify(M) ? (sgEffDSkip.current = !0, M) : H)
                 } catch {}
             }, 8e3);
             return () => clearInterval(N)
@@ -91326,7 +93503,7 @@ Floor note: "${g.trim()}"`,
         }, [S]), (0, f.useEffect)(() => {
             !S || be.current || fe("sgps-users", h)
         }, [h, S]), (0, f.useEffect)(() => {
-            !S || be.current || fe("sgps-factories", m)
+            !S || (window.__sgFactories = m, be.current) || fe("sgps-factories", m)
         }, [m, S]), (0, f.useEffect)(() => {
             if (!(!S || !v)) try {
                 localStorage.setItem("sgps-current-factory", JSON.stringify(v))
@@ -92246,7 +94423,8 @@ Floor note: "${g.trim()}"`,
         }), f.default.createElement("span", {
             className: "font-semibold text-stone-700"
         }, Nt)), f.default.createElement("main", {
-            className: "max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 pt-5 lg:pt-6 pb-10 space-y-3"
+            className: "max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 pt-5 lg:pt-6 pb-10 space-y-3",
+            "data-sgtab": w
         }, w === "styles" && f.default.createElement(f.default.Fragment, null, K && Tn.some(ne => ne.id === K) ? f.default.createElement(tte, {
             key: K,
             style: Tn.find(ne => ne.id === K),
@@ -92334,7 +94512,16 @@ Floor note: "${g.trim()}"`,
             lines: Me,
             entries: $e,
             linePlans: He
-        })), w === "cutting" && f.default.createElement(_Oe, {
+        }), f.default.createElement("div", {
+            id: "dashboard-efficiency-reports",
+            className: "mt-2"
+        }, f.default.createElement("h3", {
+            className: "text-xs font-bold text-stone-500 uppercase tracking-wide mb-2 px-1"
+        }, "Efficiency Reports"), f.default.createElement(SgEffReport, {
+            styles: F,
+            lines: Me,
+            entries: $e
+        }))), w === "cutting" && f.default.createElement(_Oe, {
             styles: F.filter(ne => ne.status === "active"),
             entries: $e,
             lines: Me,
@@ -92552,11 +94739,12 @@ Floor note: "${g.trim()}"`,
             onUpdateStyle: dt
         }), w === "styletna" && f.default.createElement(HOe, {
             styles: F,
-            onUpdate: dt
+            onUpdate: dt,
+            entries: $e
         }), w === "history" && f.default.createElement(GOe, {
             styles: F,
             entries: $e
-        }), w === "efficiency" && f.default.createElement(zOe, {
+        }), w === "efficiency" && f.default.createElement(SgEffReport, {
             styles: F,
             lines: Me,
             entries: $e
@@ -92709,14 +94897,24 @@ Floor note: "${g.trim()}"`,
             styles: F,
             entries: $e,
             overheadMonths: Ne
-        }), w === "reports" && f.default.createElement(eFe, {
+        }), w === "reports" && f.default.createElement(f.default.Fragment, null, f.default.createElement(SgEffDaily, {
+            styles: F,
+            entries: $e,
+            lines: Me,
+            linePlans: He,
+            factoryName: (m.find(ne => ne.id === v) || {}).name || ""
+        }), f.default.createElement("div", {
+            style: {
+                height: 16
+            }
+        }), f.default.createElement(eFe, {
             styles: F,
             entries: $e,
             lines: Me,
             onAddLine: tl,
             onUpdateLine: Ti,
             onDeleteLine: hi
-        }), w === "activity" && f.default.createElement(sgActivityHistory, {
+        })), w === "activity" && f.default.createElement(sgActivityHistory, {
             styles: F,
             entries: $e,
             lines: Me
@@ -92736,6 +94934,489 @@ Floor note: "${g.trim()}"`,
             onDelete: Oa
         }))))
     }
+    
+    /* ===== SGPS Health & Backup panel (vanilla DOM, independent of React tree) ===== */
+    (function sgHealth() {
+        var KEYS = ["sgps-doclib", "sgps-buyers", "sgps-costing", "sgps-dc", "sgps-employees", "sgps-entries", "sgps-factories", "sgps-lines-plans", "sgps-machines", "sgps-manpower", "sgps-mcplans", "sgps-ops", "sgps-pos", "sgps-roi", "sgps-effdaily", "sgps-skills", "sgps-spllogs", "sgps-style-master", "sgps-styles", "sgps-users", "sgps-wip"], LIMIT = 1048576;
+        var css = document.createElement("style");
+        css.textContent = "#sgh-pill{position:fixed;left:10px;bottom:10px;z-index:45;display:flex;align-items:center;gap:6px;background:#fff;border:1px solid #e7e5e4;border-radius:999px;padding:5px 10px 5px 8px;font:600 11px system-ui,sans-serif;color:#44403c;box-shadow:0 2px 8px rgba(0,0,0,.12);cursor:pointer}#sgh-pill i{width:8px;height:8px;border-radius:50%;background:#10b981;display:inline-block}#sgh-pill.warn i{background:#f59e0b}#sgh-pill.bad i{background:#ef4444}#sgh-pill.busy i{background:#3b82f6;animation:sghb 1s infinite}@keyframes sghb{50%{opacity:.3}}#sgh-back{position:fixed;inset:0;z-index:60;background:rgba(15,31,61,.55);display:none;align-items:center;justify-content:center;padding:14px}#sgh-box{background:#fff;border-radius:16px;max-width:460px;width:100%;max-height:88vh;overflow:auto;padding:16px;font:13px system-ui,sans-serif;color:#292524}#sgh-box h3{margin:0 0 4px;font-size:15px}#sgh-box .sub{font-size:11px;color:#78716c;margin-bottom:10px}.sgh-row{margin:6px 0}.sgh-row .l{display:flex;justify-content:space-between;font-size:11px;font-weight:600}.sgh-bar{height:6px;background:#f5f5f4;border-radius:4px;overflow:hidden;margin-top:2px}.sgh-bar b{display:block;height:100%;background:#0d9488}.sgh-btn{border:0;border-radius:10px;padding:9px 12px;font:700 12px system-ui,sans-serif;cursor:pointer;margin:4px 6px 0 0}.sgh-p{background:#0d9488;color:#fff}.sgh-s{background:#f5f5f4;color:#44403c}@media print{#sgh-pill,#sgh-back{display:none!important}}";
+        document.head.appendChild(css);
+        var pill = document.createElement("div"); pill.id = "sgh-pill"; pill.innerHTML = "<i></i><span>Synced</span>";
+        var back = document.createElement("div"); back.id = "sgh-back";
+        var box = document.createElement("div"); box.id = "sgh-box"; back.appendChild(box);
+        function mount() { if (document.body) { document.body.appendChild(pill); document.body.appendChild(back) } else setTimeout(mount, 100) }
+        mount();
+        function ago(t) { if (!t) return "\u2014"; var s = Math.round((Date.now() - t) / 1000); return s < 60 ? s + "s ago" : s < 3600 ? Math.round(s / 60) + " min ago" : Math.round(s / 3600) + " h ago" }
+        function worst() { var w = 0, z = window.__sgSizes || {}; for (var k in z) w = Math.max(w, z[k] / LIMIT); return w }
+        function refresh() {
+            var failed = Object.keys(window.__sgFailed || {}).length, busy = (window.__sgInflight || 0) > 0, off = !navigator.onLine, w = worst();
+            var cls = failed || off ? "bad" : w > .8 ? "warn" : busy ? "busy" : "";
+            pill.className = cls;
+            pill.querySelector("span").textContent = off ? "Offline" : failed ? "Save failed" : busy ? "Saving..." : w > .8 ? "Data " + Math.round(w * 100) + "% full" : "Synced \u00B7 " + ago(window.__sgLastSaved).replace(" ago", "");
+        }
+        window.addEventListener("sgps-sync", refresh); window.addEventListener("online", refresh); window.addEventListener("offline", refresh);
+        setInterval(refresh, 5000);
+        window.addEventListener("beforeunload", function (e) { if ((window.__sgInflight || 0) > 0 || Object.keys(window.__sgFailed || {}).length) { e.preventDefault(); e.returnValue = "" } });
+        async function readAll(withDocs) { var out = {}; for (var i = 0; i < KEYS.length; i++) { try { var d = await LG(lb(Jee, Yee, KEYS[i])); if (d.exists()) out[KEYS[i]] = d.data().value } catch (e) {} } if (withDocs && out["sgps-doclib"] && out["sgps-doclib"].docs) { var L = out["sgps-doclib"].docs; for (var j = 0; j < L.length; j++) { if (L[j].kind === "link") continue; try { var c = await LG(lb(Jee, Yee, "sgps-doc-" + L[j].id)); if (c.exists() && c.data().value) out["sgps-doc-" + L[j].id] = c.data().value } catch (e) {} } } return out }
+        function render(sizes) {
+            var rows = KEYS.map(function (k) { var b = sizes[k] || 0, p = Math.min(100, b / LIMIT * 100); return "<div class='sgh-row'><div class='l'><span>" + k.replace("sgps-", "") + "</span><span>" + Math.round(b / 1024) + " KB \u00B7 " + p.toFixed(0) + "%</span></div><div class='sgh-bar'><b style='width:" + p + "%;background:" + (p > 85 ? "#ef4444" : p > 60 ? "#f59e0b" : "#0d9488") + "'></b></div></div>" }).join("");
+            box.innerHTML = "<h3>Data Health & Backup</h3><div class='sub'>Each collection is one Firestore document (1 MB limit). Red = save fail aagum munnadi archive / backup pannunga.</div>" + rows +
+                "<div style='margin-top:10px'><button class='sgh-btn sgh-p' id='sgh-dl'>Download full backup (.json)</button><button class='sgh-btn sgh-s' id='sgh-rs'>Restore backup</button><button class='sgh-btn sgh-s' id='sgh-x'>Close</button></div><div class='sub' id='sgh-msg' style='margin-top:8px'></div><input type='file' id='sgh-file' accept='.json' style='display:none'>";
+            box.querySelector("#sgh-x").onclick = function () { back.style.display = "none" };
+            box.querySelector("#sgh-dl").onclick = async function () {
+                var m = box.querySelector("#sgh-msg"); m.textContent = "Reading data...";
+                var data = await readAll(!0);
+                var blob = new Blob([JSON.stringify({ app: "SGPS", exportedAt: new Date().toISOString(), collections: data })], { type: "application/json" });
+                var a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = "SGPS-backup-" + new Date().toISOString().slice(0, 10) + ".json"; a.click();
+                m.textContent = "Backup downloaded (" + Object.keys(data).length + " collections)."
+            };
+            box.querySelector("#sgh-rs").onclick = function () { box.querySelector("#sgh-file").click() };
+            box.querySelector("#sgh-file").onchange = async function (ev) {
+                var f = ev.target.files[0]; if (!f) return; var m = box.querySelector("#sgh-msg");
+                try {
+                    var j = JSON.parse(await f.text()); if (!j || j.app !== "SGPS" || !j.collections) throw new Error("Idhu SGPS backup file illa");
+                    var n = Object.keys(j.collections).length;
+                    if (window.prompt("Restore " + n + " collections? Ippo irukkura live data overwrite aagum. Confirm panna RESTORE nu type pannunga.") !== "RESTORE") { m.textContent = "Cancelled."; return }
+                    m.textContent = "Safety backup edukkuren...";
+                    var cur = await readAll(!0), b2 = new Blob([JSON.stringify({ app: "SGPS", exportedAt: new Date().toISOString(), collections: cur })], { type: "application/json" });
+                    var a2 = document.createElement("a"); a2.href = URL.createObjectURL(b2); a2.download = "SGPS-before-restore-" + Date.now() + ".json"; a2.click();
+                    m.textContent = "Restoring...";
+                    for (var k in j.collections) { if (KEYS.indexOf(k) < 0 && k.indexOf("sgps-doc-") !== 0) continue; await NG(lb(Jee, Yee, k), { value: j.collections[k] }) }
+                    m.textContent = "Restore done. Reloading..."; setTimeout(function () { location.reload() }, 900)
+                } catch (e) { m.textContent = "Restore failed: " + (e && e.message || e) }
+            }
+        }
+        async function showData() {
+            box.innerHTML = "<div class='sub'>Loading...</div>";
+            var data = await readAll(), sizes = {}; for (var k in data) sizes[k] = new TextEncoder().encode(JSON.stringify(data[k]) || "").length;
+            window.__sgSizes = Object.assign({}, window.__sgSizes || {}, sizes); render(sizes); refresh()
+        }
+        function showLock() {
+            box.innerHTML = "<h3>Admin unlock</h3><div class='sub'>Backup / restore admin mattum. Admin username & password kudunga.</div><input id='sgh-u' placeholder='admin username' style='width:100%;padding:8px;border:1px solid #e7e5e4;border-radius:8px;margin-bottom:6px'><input id='sgh-pw' type='password' placeholder='password' style='width:100%;padding:8px;border:1px solid #e7e5e4;border-radius:8px'><div style='margin-top:8px'><button class='sgh-btn sgh-p' id='sgh-go'>Unlock</button><button class='sgh-btn sgh-s' id='sgh-x2'>Close</button></div><div class='sub' id='sgh-err' style='color:#dc2626'></div>";
+            box.querySelector("#sgh-x2").onclick = function () { back.style.display = "none" };
+            box.querySelector("#sgh-go").onclick = async function () {
+                var u = box.querySelector("#sgh-u").value.trim().toLowerCase(), pw = box.querySelector("#sgh-pw").value, ok = !1;
+                try { var d = await LG(lb(Jee, Yee, "sgps-users")); var us = d.exists() ? d.data().value : []; ok = (us || []).some(function (x) { return x.role === "admin" && String(x.username || "").trim().toLowerCase() === u && x.password === pw }) } catch (e) {}
+                if (ok) { window.__sgAdminOk = !0; showData() } else box.querySelector("#sgh-err").textContent = "Invalid admin login"
+            }
+        }
+        pill.onclick = function () { back.style.display = "flex"; window.__sgAdminOk ? showData() : showLock() };
+        back.onclick = function (e) { if (e.target === back) back.style.display = "none" };
+        refresh();
+    })();
+
+    
+    /* ===== SGPS Department Documents: Preview + Excel export + Print/PDF (vanilla DOM) ===== */
+    (function sgDocs() {
+        var N = function (v) { v = parseFloat(v); return isFinite(v) ? v : 0 };
+        var esc = function (t) { return String(t == null ? "" : t).replace(/[&<>"]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c] }) };
+        var fmtD = function (d) { if (!d) return ""; var x = new Date(d); return isNaN(x) ? d : x.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "2-digit" }) };
+        var fmtN = function (v) { return typeof v === "number" ? v.toLocaleString("en-IN", { maximumFractionDigits: 2 }) : esc(v) };
+        var today = function () { return new Date().toISOString().slice(0, 10) };
+        var REJ = { cuttingReject: "Cutting Reject", sewingReject: "Sewing Reject", sewingLoss: "Sewing Loss" };
+        var D = function (e) { return e.date };
+        var C = {
+            date: ["Date", D, "d"], style: ["Style", function (e, c) { return c.sn(e) }], buyer: ["Buyer", function (e, c) { return c.by(e) }], line: ["Line", function (e, c) { return c.ln(e) }],
+            colour: ["Colour", function (e) { return e.colour || "" }], size: ["Size", function (e) { return e.size || "" }], hour: ["Hour", function (e) { return e.hour || "" }], reason: ["Reason", function (e) { return e.reason || "" }]
+        };
+        var qty = function (h) { return [h, function (e) { return N(e.qty) }, "n"] };
+        var DEPTS = [
+            { k: "cutting", label: "Cutting", types: ["cutting"], cols: [C.date, C.style, C.buyer, C.line, C.colour, C.size, qty("Cut Qty"), ["Manpower", function (e) { return e.manpower ? N(e.manpower) : "" }, "x"], ["Order Eff %", function (e) { return e.orderEfficiencyPct ? N(e.orderEfficiencyPct) : "" }, "x"]] },
+            { k: "sewing", label: "Production", types: ["sewing"], cols: [C.date, C.style, C.buyer, C.line, C.hour, C.size, qty("Sewing Qty"), ["Manpower", function (e) { return e.actualManpower ? N(e.actualManpower) : "" }, "x"]] },
+            { k: "feeding", label: "Line Feeding", types: ["feeding"], cols: [C.date, C.style, C.buyer, C.line, C.colour, C.size, qty("Fed Qty")] },
+            { k: "packing", label: "Packing", types: ["packing"], cols: [C.date, C.style, C.buyer, C.line, C.colour, C.size, qty("Packed Qty")] },
+            { k: "downtime", label: "Downtime", types: ["downtime"], cols: [C.date, C.style, C.line, ["Machine No", function (e) { return e.machineNo || "" }], C.reason, qty("Downtime (min)")] },
+            { k: "ot", label: "OT", types: ["ot"], cols: [C.date, C.style, C.line, ["Department", function (e) { return e.dept || "" }], ["OT Manpower", function (e) { return N(e.otManpower) }, "x"], ["OT Hours", function (e) { return N(e.otHours) }, "x"], ["Man-hours", function (e) { return N(e.otManpower) * N(e.otHours) }, "n"]] },
+            { k: "rejection", label: "Rejection", types: ["cuttingReject", "sewingReject", "sewingLoss"], cols: [C.date, C.style, C.line, ["Type", function (e) { return REJ[e.type] || e.type }], C.hour, C.size, C.reason, qty("Qty")] },
+            { k: "rework", label: "Rework", types: ["rework"], cols: [C.date, C.style, C.line, C.hour, C.reason, qty("Rework Qty")] }
+        ];
+        var st = { dept: "all", from: today(), to: today(), style: "", line: "", ids: null, mode: "reg" };
+        function curFac() { try { var v = localStorage.getItem("sgps-current-factory"); return v ? JSON.parse(v) : null } catch (e) { return null } }
+        function ctx() {
+            var styles = window.__sgStyles || [], lines = window.__sgLines || [], fac = curFac(), sm = {}, lm = {};
+            styles.forEach(function (x) { sm[x.id] = x }); lines.forEach(function (x) { lm[x.id] = x });
+            var f = (window.__sgFactories || []).filter(function (x) { return x.id === fac })[0];
+            return {
+                styles: styles.filter(function (x) { return !fac || !x.factoryId || x.factoryId === fac }), lines: lines.filter(function (x) { return !fac || !x.factoryId || x.factoryId === fac }),
+                fac: f ? f.name : "", sm: sm,
+                sn: function (e) { var s = sm[e.styleId]; return s ? (s.styleNo || "Untitled") : "(deleted style)" },
+                by: function (e) { var s = sm[e.styleId]; return s ? (s.buyer || "") : "" },
+                ln: function (e) { var l = lm[e.lineId]; return l ? (l.lineNo || "Line") : "" },
+                inScope: function (e) { var s = sm[e.styleId]; return !s || !fac || !s.factoryId || s.factoryId === fac }
+            }
+        }
+        function rowsFor(d, c) {
+            var ids = st.ids;
+            return (window.__sgEntries || []).filter(function (e) {
+                if (d.types.indexOf(e.type) < 0 || !c.inScope(e)) return false;
+                if (ids) return ids[e.id];
+                if (st.from && e.date < st.from) return false; if (st.to && e.date > st.to) return false;
+                if (st.style && e.styleId !== st.style) return false; if (st.line && e.lineId !== st.line) return false; return true
+            }).sort(function (a, b) { return (a.date < b.date ? -1 : a.date > b.date ? 1 : 0) || c.sn(a).localeCompare(c.sn(b), void 0, { numeric: !0 }) || c.ln(a).localeCompare(c.ln(b), void 0, { numeric: !0 }) })
+        }
+        function build(d, c) {
+            var rows = rowsFor(d, c).map(function (e) { return d.cols.map(function (col) { return col[1](e, c) }) });
+            var tot = d.cols.map(function (col, i) { return col[2] === "n" ? rows.reduce(function (a, r) { return a + N(r[i]) }, 0) : null });
+            return { d: d, head: d.cols.map(function (x) { return x[0] }), kinds: d.cols.map(function (x) { return x[2] || "" }), rows: rows, tot: tot }
+        }
+        function active(c) { return DEPTS.filter(function (d) { return st.dept === "all" || st.dept === d.k }).map(function (d) { return build(d, c) }).filter(function (b) { return b.rows.length }) }
+        function period() { return st.ids ? "Just-saved entries" : (st.from === st.to ? fmtD(st.from) : fmtD(st.from) + " \u2192 " + fmtD(st.to)) }
+        function previewHTML(c) {
+            var bl = active(c);
+            var h = "<div class='sgd-doc'><div class='sgd-dh'><div><b>" + esc(c.fac || "SGPS") + "</b><br><span>" + (st.dept === "all" ? "All Departments" : esc(DEPTS.filter(function (d) { return d.k === st.dept })[0].label)) + " \u2014 Entry Register</span></div><div style='text-align:right'><span>Period: " + esc(period()) + "</span><br><span>Generated: " + esc(fmtD(today())) + "</span></div></div>";
+            if (!bl.length) return h + "<div class='sgd-empty'>Intha filter-ku entry illa. Date range / style maathi paarunga.</div></div>";
+            bl.forEach(function (b) {
+                h += "<div class='sgd-sec'>" + esc(b.d.label) + " <small>(" + b.rows.length + (b.rows.length === 1 ? " entry" : " entries") + ")</small></div><div class='sgd-wrap'><table><thead><tr>" + b.head.map(function (x) { return "<th>" + esc(x) + "</th>" }).join("") + "</tr></thead><tbody>" +
+                    b.rows.map(function (r) { return "<tr>" + r.map(function (v, i) { return "<td" + (typeof v === "number" ? " class='r'" : "") + ">" + (b.kinds[i] === "d" ? esc(fmtD(v)) : fmtN(v)) + "</td>" }).join("") + "</tr>" }).join("") +
+                    "</tbody><tfoot><tr>" + b.tot.map(function (v, i) { return "<td class='r'>" + (i === 0 ? "TOTAL" : v == null ? "" : fmtN(v)) + "</td>" }).join("") + "</tr></tfoot></table></div>"
+            });
+            return h + "<div class='sgd-sign'><span>Prepared by</span><span>Checked by</span><span>Approved by</span></div></div>"
+        }
+        function exportXlsx() {
+            var c = ctx(), msg = box.querySelector("#sgd-msg");
+            try {
+                var bl = active(c); if (!bl.length) { msg.textContent = "Export panna entry illa."; return }
+                var wb = $a.book_new(), meta = [(c.fac || "SGPS") + " \u2014 Entry Register", "Period: " + period() + "   Generated: " + today()];
+                bl.forEach(function (b) {
+                    var aoa = [[meta[0] + " \u2014 " + b.d.label], [meta[1]], [], b.head].concat(b.rows);
+                    aoa.push(b.tot.map(function (v, i) { return i === 0 ? "TOTAL" : v }));
+                    var ws = $a.aoa_to_sheet(aoa); ws["!cols"] = b.head.map(function (x) { return { wch: Math.max(10, x.length + 4) } });
+                    $a.book_append_sheet(wb, ws, b.d.label.replace(/[\\\/?*\[\]:]/g, "").slice(0, 31))
+                });
+                var nm = "SGPS_" + (st.dept === "all" ? "AllDepartments" : bl[0].d.label.replace(/\s+/g, "")) + "_" + (st.ids ? "Saved_" + today() : st.from + "_to_" + st.to) + ".xlsx";
+                TD(wb, nm); msg.textContent = "Excel downloaded: " + nm
+            } catch (e) { msg.textContent = "Export failed: " + (e && e.message || e) }
+        }
+        var css = document.createElement("style");
+        css.textContent = "#sgd-fab{position:fixed;right:10px;bottom:10px;z-index:44;background:#0d9488;color:#fff;border:0;border-radius:999px;padding:9px 14px;font:700 12px system-ui,sans-serif;box-shadow:0 3px 10px rgba(0,0,0,.25);cursor:pointer}#sgd-back{position:fixed;inset:0;z-index:62;background:rgba(15,31,61,.55);display:none;align-items:flex-start;justify-content:center;padding:10px;overflow:auto}#sgd-box{background:#fff;border-radius:14px;width:100%;max-width:980px;padding:14px;font:13px system-ui,sans-serif;color:#292524}#sgd-box h3{margin:0 0 8px;font-size:15px}.sgd-ctl{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px}.sgd-ctl label{display:flex;flex-direction:column;font:700 10px system-ui;text-transform:uppercase;letter-spacing:.04em;color:#78716c;gap:2px}.sgd-ctl select,.sgd-ctl input{font:13px system-ui;padding:6px 8px;border:1px solid #e7e5e4;border-radius:8px;text-transform:none;color:#292524;min-width:120px}.sgd-b{border:0;border-radius:10px;padding:9px 12px;font:700 12px system-ui;cursor:pointer;margin:2px 6px 2px 0}.sgd-p{background:#0d9488;color:#fff}.sgd-s{background:#f5f5f4;color:#44403c}.sgd-doc{border:1px solid #e7e5e4;border-radius:10px;padding:12px;margin-top:8px;background:#fff}.sgd-dh{display:flex;justify-content:space-between;gap:10px;border-bottom:2px solid #0f1f3d;padding-bottom:6px;font-size:12px}.sgd-dh b{font-size:15px;color:#0f1f3d}.sgd-dh span{color:#57534e}.sgd-sec{margin:12px 0 4px;font:800 12px system-ui;color:#0f1f3d;text-transform:uppercase;letter-spacing:.04em}.sgd-sec small{font-weight:600;color:#78716c}.sgd-wrap{overflow-x:auto}.sgd-doc table{border-collapse:collapse;width:100%;font-size:12px}.sgd-doc th{background:#0f1f3d;color:#fff;text-align:left;padding:5px 7px;white-space:nowrap}.sgd-doc td{border-bottom:1px solid #e7e5e4;padding:4px 7px;white-space:nowrap}.sgd-doc td.r{text-align:right}.sgd-doc tfoot td{font-weight:800;background:#f0fdfa;border-top:2px solid #0d9488}.sgd-empty{padding:24px;text-align:center;color:#78716c}.sgd-sign{display:flex;justify-content:space-between;margin-top:34px;font-size:11px;color:#57534e}.sgd-sign span{border-top:1px solid #a8a29e;padding-top:3px;width:30%;text-align:center}.sgd-banner{background:#fffbeb;border:1px solid #fcd34d;border-radius:8px;padding:6px 10px;font-size:12px;margin-bottom:6px}#sgd-toast{position:fixed;left:50%;transform:translateX(-50%);bottom:62px;z-index:63;background:#0f1f3d;color:#fff;border-radius:12px;padding:9px 12px;font:600 12px system-ui;display:none;align-items:center;gap:10px;box-shadow:0 4px 14px rgba(0,0,0,.3);max-width:92vw}#sgd-toast button{border:0;border-radius:8px;padding:5px 10px;font:700 11px system-ui;cursor:pointer}@media print{@page{size:A4 landscape;margin:10mm}body>*:not(#sgd-back){display:none!important}#sgd-back{position:static!important;display:block!important;background:none;padding:0;overflow:visible}#sgd-box{max-width:none;padding:0}.sgd-noprint{display:none!important}.sgd-doc{border:0;padding:0}}";
+        document.head.appendChild(css);
+        var fab = document.createElement("div"); fab.id = "sgd-fab";
+        var back = document.createElement("div"); back.id = "sgd-back"; var box = document.createElement("div"); box.id = "sgd-box"; back.appendChild(box);
+        var toast = document.createElement("div"); toast.id = "sgd-toast";
+        function mount() { if (document.body) { document.body.appendChild(fab); document.body.appendChild(back); document.body.appendChild(toast) } else setTimeout(mount, 100) }
+        mount();
+        function opts(arr, val, lab, all) { return (all ? "<option value=''>" + all + "</option>" : "") + arr.map(function (x) { return "<option value='" + esc(x.id) + "'>" + esc(lab(x)) + "</option>" }).join("") }
+        var DEPT_OF = { cutting: "cutting", production: "sewing", feeding: "feeding", packing: "packing", downtime: "downtime", ot: "ot", rejection: "rejection", rework: "rework" };
+        function tabKey() { var m = document.querySelector("main[data-sgtab]"); return m ? m.getAttribute("data-sgtab") : "" }
+        function tabLabel() { var k = tabKey(); try { var x = LA.filter(function (y) { return y.key === k })[0]; if (x) return x.label } catch (e) {} return k || "Screen" }
+        function snapshot() {
+            var main = document.querySelector("main[data-sgtab]"); if (!main) return null;
+            var clone = main.cloneNode(true), oc = main.querySelectorAll("input,select,textarea"), cc = clone.querySelectorAll("input,select,textarea");
+            for (var i = 0; i < oc.length; i++) {
+                var o = oc[i], c = cc[i], v = "";
+                if (!c || !c.parentNode) continue;
+                if (o.type === "hidden" || o.type === "file") { c.parentNode.removeChild(c); continue }
+                if (o.type === "checkbox" || o.type === "radio") v = o.checked ? "\u2611" : "\u2610";
+                else if (o.tagName === "SELECT") v = o.options[o.selectedIndex] ? o.options[o.selectedIndex].text : "";
+                else if (o.type === "date" && o.value) v = fmtD(o.value); else v = o.value;
+                var sp = document.createElement("span"); sp.className = "sgd-val"; sp.textContent = v || "\u00A0"; c.parentNode.replaceChild(sp, c)
+            }
+            var os = main.querySelectorAll("svg"), cs = clone.querySelectorAll("svg");
+            for (var j = 0; j < os.length; j++) { var r = os[j].getBoundingClientRect(); if ((r.width < 60 || r.height < 60) && cs[j] && cs[j].parentNode) cs[j].parentNode.removeChild(cs[j]) }
+            [].slice.call(clone.querySelectorAll("button,script,style,.sgd-noprint,[data-sgd-skip]")).forEach(function (x) { if (x.parentNode) x.parentNode.removeChild(x) });
+            return clone
+        }
+        function textRows(root) {
+            var rows = [], T = function (n) { return (n.textContent || "").replace(/\s+/g, " ").trim() };
+            (function walk(n) {
+                var els = [].slice.call(n.children || []);
+                if (!els.length) { var t = T(n); if (t) rows.push([t]); return }
+                var simple = els.every(function (x) { return !x.children.length && x.tagName !== "TABLE" });
+                if (simple && n.tagName !== "TABLE") {
+                    var cells = []; [].slice.call(n.childNodes).forEach(function (ch) { var t = T(ch); if (t) cells.push(t) });
+                    if (cells.length) rows.push(cells); return
+                }
+                [].slice.call(n.childNodes).forEach(function (ch) {
+                    if (ch.nodeType === 3) { var t = T(ch); if (t) rows.push([t]) } else if (ch.nodeType === 1 && ch.tagName !== "TABLE") walk(ch)
+                })
+            })(root);
+            return rows
+        }
+        function exportScreen() {
+            var msg = box.querySelector("#sgd-msg"), cl = snapshot(), c = ctx();
+            if (!cl) { msg.textContent = "Intha screen-la export panna data illa."; return }
+            try {
+                var wb = $a.book_new(), used = {}, label = tabLabel();
+                var nm = function (t) { t = (t || "Sheet").replace(/[\\\/?*\[\]:]/g, "").trim().slice(0, 28) || "Sheet"; var b = t, i = 1; while (used[t.toLowerCase()]) { t = b.slice(0, 25) + "_" + (++i) } used[t.toLowerCase()] = 1; return t };
+                var rows = textRows(cl), tables = [].slice.call(cl.querySelectorAll("table")), made = 0;
+                if (rows.length) {
+                    var ws = $a.aoa_to_sheet([[(c.fac || "SGPS") + " \u2014 " + label], ["Generated: " + today()], []].concat(rows)); ws["!cols"] = [{ wch: 34 }, { wch: 24 }, { wch: 18 }, { wch: 18 }]; $a.book_append_sheet(wb, ws, nm("Details")); made++
+                }
+                tables.forEach(function (t, i) {
+                    var h = "", p = t, k = 0; while (p && p !== cl && k < 4 && !h) { var ps = p.previousElementSibling; if (ps && ps.tagName !== "TABLE") h = (ps.textContent || "").replace(/\s+/g, " ").trim().slice(0, 28); p = p.parentElement; k++ }
+                    if (!t.rows || !t.rows.length) return;
+                    $a.book_append_sheet(wb, $a.table_to_sheet(t), nm(h || "Table " + (i + 1))); made++
+                });
+                if (!made) { msg.textContent = "Intha screen-la export panna data illa."; return }
+                var fn = "SGPS_" + label.replace(/[^A-Za-z0-9]+/g, "") + "_" + today() + ".xlsx"; TD(wb, fn); msg.textContent = "Excel downloaded: " + fn
+            } catch (e) { msg.textContent = "Export failed: " + (e && e.message || e) }
+        }
+        function saveStatus() {
+            var bad = Object.keys(window.__sgFailed || {}).length;
+            return bad ? "\u26A0 Cloud save pending / failed" : window.__sgLastSaved ? "\u2713 Saved to cloud " + new Date(window.__sgLastSaved).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" }) : "\u2713 Auto-save on"
+        }
+        function screenHTML() {
+            var cl = snapshot(), c = ctx(); if (!cl) return "<div class='sgd-empty'>Screen illa</div>";
+            return "<div class='sgd-doc'><div class='sgd-dh'><div><b>" + esc(c.fac || "SGPS") + "</b><br><span>" + esc(tabLabel()) + " \u2014 Screen Report</span></div><div style='text-align:right'><span>Generated: " + esc(fmtD(today())) + "</span><br><span>" + esc(saveStatus()) + "</span></div></div><div class='sgd-screen'>" + cl.innerHTML + "</div><div class='sgd-sign'><span>Prepared by</span><span>Checked by</span><span>Approved by</span></div></div>"
+        }
+        function refreshPrev() {
+            var c = ctx(), m = st.mode, reg = m === "reg", auto = m === "auto";
+            box.querySelector("#sgd-prev").innerHTML = auto ? autoHTML(c) : reg ? previewHTML(c) : screenHTML();
+            box.querySelector("#sgd-ban").style.display = reg && st.ids ? "block" : "none";
+            box.querySelector("#sgd-regctl").style.display = reg ? "block" : "none";
+            box.querySelector("#sgd-autoctl").style.display = auto ? "block" : "none";
+            ["scr", "reg", "auto"].forEach(function (k) { box.querySelector("#sgd-m-" + k).className = "sgd-b " + (m === k ? "sgd-p" : "sgd-s") });
+            box.querySelector("#sgd-msg").textContent = saveStatus()
+        }
+        function open(action) {
+            var c = ctx(), k = tabKey();
+            if (action !== "keep" && typeof action !== "function" && !st.ids) { if (DEPT_OF[k]) { st.mode = "reg"; st.dept = DEPT_OF[k]; st.from = st.to = today(); st.style = ""; st.line = "" } else st.mode = "scr" }
+            box.innerHTML = "<div class='sgd-noprint'><h3>" + esc(tabLabel()) + " \u2014 Preview & Export</h3><div style='margin-bottom:6px'><button class='sgd-b sgd-p' id='sgd-m-scr'>This screen</button><button class='sgd-b sgd-s' id='sgd-m-reg'>Entry register (department)</button><button class='sgd-b sgd-s' id='sgd-m-auto'>\u26A1 Auto Daily Report</button></div><div id='sgd-autoctl' style='display:none;margin-bottom:6px'><label style='font:700 10px system-ui;color:#78716c;text-transform:uppercase'>Report date <input type='date' id='sgd-ad' style='padding:6px 8px;border:1px solid #e7e5e4;border-radius:8px;font:13px system-ui;margin-left:6px'></label> <span style='font-size:11px;color:#57534e'>Entry venaam \u2014 already irukkura entries / lines / styles-la irundhu auto-ah varum.</span></div><div id='sgd-regctl'><div class='sgd-ctl'>" +
+                "<label>Department<select id='sgd-dept'><option value='all'>All Departments</option>" + DEPTS.map(function (d) { return "<option value='" + d.k + "'>" + d.label + "</option>" }).join("") + "</select></label>" +
+                "<label>From<input type='date' id='sgd-from'></label><label>To<input type='date' id='sgd-to'></label>" +
+                "<label>Style<select id='sgd-style'>" + opts(c.styles, "", function (x) { return (x.styleNo || "Untitled") + " \u2014 " + (x.buyer || "") }, "All styles") + "</select></label>" +
+                "<label>Line<select id='sgd-line'>" + opts(c.lines, "", function (x) { return x.lineNo || "Line" }, "All lines") + "</select></label></div>" +
+                "<div class='sgd-banner' id='sgd-ban' style='display:none'>Just-saved entries mattum kaattuthu. <a href='#' id='sgd-showall'>Show all (date range)</a></div></div>" +
+                "<div><button class='sgd-b sgd-p' id='sgd-xl'>Export Excel</button><button class='sgd-b sgd-s' id='sgd-pr'>Print / Save PDF</button><button class='sgd-b sgd-s' id='sgd-sv'>\uD83D\uDCBE Save to folder</button><button class='sgd-b sgd-s' id='sgd-cl'>Close</button> <span id='sgd-msg' style='font-size:11px;color:#57534e'></span></div></div><div id='sgd-prev'></div>";
+            var set = function (id, v) { box.querySelector(id).value = v };
+            set("#sgd-dept", st.dept); set("#sgd-from", st.from); set("#sgd-to", st.to); set("#sgd-style", st.style); set("#sgd-line", st.line);
+            [["#sgd-dept", "dept"], ["#sgd-from", "from"], ["#sgd-to", "to"], ["#sgd-style", "style"], ["#sgd-line", "line"]].forEach(function (p) { box.querySelector(p[0]).onchange = function (ev) { st[p[1]] = ev.target.value; st.ids = null; refreshPrev() } });
+            box.querySelector("#sgd-m-scr").onclick = function () { st.mode = "scr"; refreshPrev() }; box.querySelector("#sgd-m-reg").onclick = function () { st.mode = "reg"; refreshPrev() }; box.querySelector("#sgd-m-auto").onclick = function () { st.mode = "auto"; refreshPrev() };
+            if (!st.autoDate) st.autoDate = latestDate(c); var adEl = box.querySelector("#sgd-ad"); adEl.value = st.autoDate; adEl.onchange = function (ev) { st.autoDate = ev.target.value || today(); refreshPrev() };
+            box.querySelector("#sgd-showall").onclick = function (ev) { ev.preventDefault(); st.ids = null; refreshPrev() };
+            box.querySelector("#sgd-xl").onclick = function () { st.mode === "reg" ? exportXlsx() : st.mode === "auto" ? exportAuto() : exportScreen() }; box.querySelector("#sgd-pr").onclick = function () { window.print() }; box.querySelector("#sgd-sv").onclick = saveCurrent;
+            box.querySelector("#sgd-cl").onclick = function () { back.style.display = "none" };
+            back.style.display = "block"; refreshPrev()
+        }
+        function mkBtn(t, fn) { var b = document.createElement("button"); b.textContent = t; b.onclick = fn; return b }
+        fab.innerHTML = ""; fab.id = "sgd-fab";
+        fab.appendChild(mkBtn("\uD83D\uDC41 Preview", function () { st.ids = null; open() }));
+        fab.appendChild(mkBtn("\u2B07 Excel", function () { st.ids = null; open(); box.querySelector("#sgd-xl").click() }));
+        fab.appendChild(mkBtn("\uD83D\uDDA8 Print", function () { st.ids = null; open(); setTimeout(function () { window.print() }, 250) }));
+        fab.appendChild(mkBtn("\uD83D\uDCC1 Folders", function () { openLib() }));
+        fab.insertBefore(mkBtn("\u26A1 Daily Report", function () { st.ids = null; st.mode = "auto"; st.autoDate = ""; open("keep") }), fab.firstChild);
+        var fcss = document.createElement("style"); fcss.textContent = "#sgd-fab{display:none;gap:0;padding:0;overflow:hidden;background:#0d9488;border-radius:999px}#sgd-fab button{background:none;border:0;color:#fff;font:700 12px system-ui;padding:9px 11px;cursor:pointer}#sgd-fab button+button{border-left:1px solid rgba(255,255,255,.3)}.sgd-val{display:inline-block;min-width:56px;border-bottom:1px dotted #78716c;font-weight:600;color:#0f1f3d}.sgd-screen{font-size:12px}.sgd-screen .overflow-x-auto,.sgd-screen .overflow-auto{overflow:visible!important}.sgd-screen table{width:100%}@media print{.sgd-screen *{break-inside:avoid}}.sgd-screen{position:relative;isolation:isolate}.sgd-screen .fixed,.sgd-screen .sticky{position:static!important;inset:auto!important}.sgd-screen [class*=\"z-\"]{z-index:auto!important}.sgd-screen [class*=\"max-h-\"]{max-height:none!important}.sgd-screen [class*=\"h-screen\"]{height:auto!important;min-height:0!important}#sgd-fab,#sgh-pill{z-index:61!important}#sgd-back{z-index:65!important}#sgh-back{z-index:66!important}#sgd-toast{z-index:67!important}";
+        document.head.appendChild(fcss);
+        setInterval(function () { fab.style.display = document.querySelector("main[data-sgtab]") ? "flex" : "none" }, 800);
+        back.onclick = function (e) { if (e.target === back) back.style.display = "none" };
+        
+        /* ===== Document Library: Buyer > Style > Folder > Documents (+ date-wise) ===== */
+        var IDX = "sgps-doclib", DEF_CATS = ["Costing", "OB & SMV", "GSD", "Efficiency", "IE Formats", "Reports", "Others"], GEN = "General", cache = null, LS = { view: "buyer", path: [], q: "" };
+        var K = function (v) { return String(v == null ? "" : v).trim().toLowerCase() };
+        async function getIdx() { var d = await LG(lb(Jee, Yee, IDX)); var v = d.exists() ? d.data().value : null; if (!v || !Array.isArray(v.docs)) v = { cats: DEF_CATS.slice(), docs: [] }; if (!v.cats || !v.cats.length) v.cats = DEF_CATS.slice(); return v }
+        async function updIdx(fn) { var v = await getIdx(); v = fn(v) || v; await NG(lb(Jee, Yee, IDX), { value: v }); cache = v; return v }
+        async function putContent(id, obj) { var n = JSON.stringify(obj).length; if (n > 1000000) throw new Error("Document " + Math.round(n / 1024) + " KB \u2014 1 MB limit mela. Chinna file illa link use pannunga."); await NG(lb(Jee, Yee, "sgps-doc-" + id), { value: obj }) }
+        async function getContent(id) { var d = await LG(lb(Jee, Yee, "sgps-doc-" + id)); return d.exists() ? d.data().value : null }
+        function uniq(map) { return Object.keys(map).map(function (k) { return map[k] }).sort(function (a, b) { return a.localeCompare(b, void 0, { numeric: !0 }) }) }
+        function allBuyers(idx) { var m = {}, add = function (b) { if (K(b)) m[K(b)] = m[K(b)] || String(b).trim() }; (sgMaster.master || []).forEach(function (b) { add(b && b.name) }); (sgMaster.styleMaster || []).forEach(function (x) { add(x.buyer) }); (window.__sgStyles || []).forEach(function (x) { add(x.buyer) }); idx.docs.forEach(function (d) { add(d.buyer) }); return uniq(m) }
+        function stylesOf(b, idx) { var m = {}, add = function (x) { if (K(x)) m[K(x)] = m[K(x)] || String(x).trim() }; (sgMaster.styleMaster || []).forEach(function (x) { if (K(x.buyer) === K(b)) add(x.styleNo) }); (window.__sgStyles || []).forEach(function (x) { if (K(x.buyer) === K(b)) add(x.styleNo) }); idx.docs.forEach(function (d) { if (K(d.buyer) === K(b)) add(d.style) }); return uniq(m) }
+        function bOf(d) { return d.buyer ? d.buyer : GEN }
+        function docsAt(idx, p) { return idx.docs.filter(function (d) { if (!p.length) return !0; if (K(bOf(d)) !== K(p[0])) return !1; if (p.length > 1 && K(d.style || GEN) !== K(p[1])) return !1; if (p.length > 2 && K(d.cat) !== K(p[2])) return !1; return !0 }) }
+        function pl(n, w) { return n + " " + w + (n === 1 ? "" : "s") }
+        function lastDate(ds) { var m = ""; ds.forEach(function (d) { if (d.date > m) m = d.date }); return m ? fmtD(m) : "\u2014" }
+        function kb(n) { return n ? (n > 1048576 ? (n / 1048576).toFixed(1) + " MB" : Math.max(1, Math.round(n / 1024)) + " KB") : "\u2014" }
+        function typeOf(d) { return d.kind === "snap" ? "Report snapshot" : d.kind === "link" ? "Link" : (d.mime || "").indexOf("image") === 0 ? "Image" : (d.mime || "").indexOf("pdf") >= 0 ? "PDF" : ((d.name || "").split(".").pop() || "File").toUpperCase() + " file" }
+        function iconOf(d) { return d.kind === "snap" ? "\uD83D\uDCC4" : d.kind === "link" ? "\uD83D\uDD17" : (d.mime || "").indexOf("image") === 0 ? "\uD83D\uDDBC" : (d.mime || "").indexOf("pdf") >= 0 ? "\uD83D\uDCD5" : "\uD83D\uDCCE" }
+        var lcss = document.createElement("style");
+        lcss.textContent = "#sgl-back,#sgl-view,#sgl-form{position:fixed;inset:0;display:none;align-items:flex-start;justify-content:center;padding:10px;overflow:auto;background:rgba(15,31,61,.55)}#sgl-back{z-index:64}#sgl-view{z-index:68}#sgl-form{z-index:70;align-items:center}#sgl-box,#sgl-vbox,#sgl-fbox{background:#fff;border-radius:14px;width:100%;padding:14px;font:13px system-ui,sans-serif;color:#292524}#sgl-box{max-width:980px}#sgl-vbox{max-width:980px}#sgl-fbox{max-width:420px}.sgl-bc{display:flex;flex-wrap:wrap;gap:4px;align-items:center;font-size:12px;margin:6px 0;color:#57534e}.sgl-bc a{color:#0d9488;font-weight:700;cursor:pointer;text-decoration:none}.sgl-t{width:100%;border-collapse:collapse;font-size:12.5px}.sgl-t th{text-align:left;color:#78716c;font-weight:600;padding:5px 8px;border-bottom:1px solid #e7e5e4}.sgl-t td{padding:7px 8px;border-bottom:1px solid #f5f5f4}.sgl-r{cursor:pointer}.sgl-r:hover{background:#f0fdfa}.sgl-ab{border:0;background:#f5f5f4;border-radius:8px;padding:4px 8px;margin-left:4px;cursor:pointer;font-size:12px}.sgl-ab.d{color:#dc2626}.sgl-f label{display:block;font:700 10px system-ui;text-transform:uppercase;letter-spacing:.04em;color:#78716c;margin:8px 0 2px}.sgl-f input,.sgl-f select{width:100%;padding:7px 9px;border:1px solid #e7e5e4;border-radius:8px;font:13px system-ui}.sgl-tab{border:0;border-radius:999px;padding:6px 12px;font:700 12px system-ui;cursor:pointer;background:#f5f5f4;color:#44403c;margin-right:4px}.sgl-tab.on{background:#0f1f3d;color:#fff}body.sgl-printing>*:not(#sgl-view){display:none!important}body.sgl-printing>#sgl-view{display:block!important;position:static!important;background:none;padding:0}body.sgl-printing .sgd-noprint{display:none!important}";
+        document.head.appendChild(lcss);
+        var lback = document.createElement("div"); lback.id = "sgl-back"; var lbox = document.createElement("div"); lbox.id = "sgl-box"; lback.appendChild(lbox);
+        var vback = document.createElement("div"); vback.id = "sgl-view"; var vbox = document.createElement("div"); vbox.id = "sgl-vbox"; vback.appendChild(vbox);
+        var fback = document.createElement("div"); fback.id = "sgl-form"; var fbox = document.createElement("div"); fbox.id = "sgl-fbox"; fback.appendChild(fbox);
+        function mountL() { if (document.body) { document.body.appendChild(lback); document.body.appendChild(vback); document.body.appendChild(fback) } else setTimeout(mountL, 100) } mountL();
+        lback.onclick = function (e) { if (e.target === lback) lback.style.display = "none" }; vback.onclick = function (e) { if (e.target === vback) vback.style.display = "none" };
+        function crumbs() {
+            var p = LS.path, h = "<a data-go='[]'>Library</a>";
+            for (var i = 0; i < p.length; i++) h += " \u203A <a data-go='" + esc(JSON.stringify(p.slice(0, i + 1))) + "'>" + esc(p[i]) + "</a>";
+            return h
+        }
+        function renderLib() {
+            var idx = cache; if (!idx) return; var p = LS.path, q = K(LS.q), rows = "", head = "", bd;
+            var folder = function (name, go, date, det) { return "<tr class='sgl-r' data-go='" + esc(JSON.stringify(go)) + "'><td>\uD83D\uDCC1 " + esc(name) + "</td><td>" + esc(date) + "</td><td>File folder</td><td>" + esc(det) + "</td></tr>" };
+            var docRow = function (d, loc) { return "<tr><td>" + iconOf(d) + " <b>" + esc(d.title) + "</b>" + (loc ? "<div style='font-size:10.5px;color:#78716c'>" + esc(bOf(d) + " \u203A " + (d.style || GEN) + " \u203A " + d.cat) + "</div>" : "") + "</td><td>" + esc(fmtD(d.date)) + "</td><td>" + typeOf(d) + "</td><td>" + kb(d.size) + " <span style='white-space:nowrap'><button class='sgl-ab' data-open='" + d.id + "'>Open</button><button class='sgl-ab' data-dl='" + d.id + "'>\u2B07</button><button class='sgl-ab d' data-del='" + d.id + "'>\uD83D\uDDD1</button></span></td></tr>" };
+            var th = "<thead><tr><th>Name</th><th>Date modified</th><th>Type</th><th>Details</th></tr></thead>";
+            if (q) {
+                var hit = idx.docs.filter(function (d) { return K([d.title, d.buyer, d.style, d.cat, d.name].join(" ")).indexOf(q) >= 0 }).sort(function (a, b) { return a.date < b.date ? 1 : -1 });
+                bd = hit.length ? hit.map(function (d) { return docRow(d, !0) }).join("") : "<tr><td colspan='4' style='padding:20px;text-align:center;color:#78716c'>Match aagura document illa</td></tr>"
+            } else if (LS.view === "buyer") {
+                if (!p.length) { var bs = allBuyers(idx), gen = idx.docs.filter(function (d) { return !d.buyer }); bs.forEach(function (b) { var ds = docsAt(idx, [b]); rows += folder(b, [b], lastDate(ds), pl(stylesOf(b, idx).length, "style") + " \u00B7 " + pl(ds.length, "doc")) }); if (gen.length || !bs.length) rows += folder(GEN, [GEN], lastDate(gen), pl(gen.length, "doc")); bd = rows }
+                else if (p.length === 1) { var sts = p[0] === GEN ? [] : stylesOf(p[0], idx); rows += folder(GEN, [p[0], GEN], lastDate(docsAt(idx, [p[0], GEN])), pl(docsAt(idx, [p[0], GEN]).length, "doc")); sts.forEach(function (x) { var ds = docsAt(idx, [p[0], x]); rows += folder(x, [p[0], x], lastDate(ds), pl(ds.length, "doc")) }); bd = rows }
+                else if (p.length === 2) { idx.cats.forEach(function (c) { var ds = docsAt(idx, [p[0], p[1], c]); rows += folder(c, [p[0], p[1], c], lastDate(ds), pl(ds.length, "doc")) }); bd = rows }
+                else { var ds2 = docsAt(idx, p).sort(function (a, b) { return a.date < b.date ? 1 : -1 }); bd = ds2.length ? ds2.map(function (d) { return docRow(d, !1) }).join("") : "<tr><td colspan='4' style='padding:20px;text-align:center;color:#78716c'>Intha folder empty. \u2B06 Upload illa \uD83D\uDCBE Save to folder use pannunga.</td></tr>" }
+            } else {
+                var byY = {}; idx.docs.forEach(function (d) { var y = (d.date || "").slice(0, 4) || "----"; (byY[y] = byY[y] || []).push(d) });
+                var MN = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+                if (!p.length) { Object.keys(byY).sort().reverse().forEach(function (y) { rows += folder(y, [y], lastDate(byY[y]), pl(byY[y].length, "doc")) }); bd = rows || "<tr><td colspan='4' style='padding:20px;text-align:center;color:#78716c'>Innum document save aagala</td></tr>" }
+                else if (p.length === 1) { var byM = {}; (byY[p[0]] || []).forEach(function (d) { var m = (d.date || "").slice(5, 7); (byM[m] = byM[m] || []).push(d) }); Object.keys(byM).sort().reverse().forEach(function (m) { rows += folder(MN[parseInt(m, 10) - 1] || m, [p[0], m], lastDate(byM[m]), pl(byM[m].length, "doc")) }); bd = rows }
+                else { var dd = (byY[p[0]] || []).filter(function (d) { return (d.date || "").slice(5, 7) === p[1] }).sort(function (a, b) { return a.date < b.date ? 1 : -1 }); bd = dd.map(function (d) { return docRow(d, !0) }).join("") }
+            }
+            var crumbHtml = LS.view === "buyer" ? crumbs() : (function () { var h = "<a data-go='[]'>Date-wise</a>"; p.forEach(function (x, i) { var lab = i === 1 ? ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"][parseInt(x, 10) - 1] || x : x; h += " \u203A <a data-go='" + esc(JSON.stringify(p.slice(0, i + 1))) + "'>" + esc(lab) + "</a>" }); return h })();
+            lbox.innerHTML = "<div class='sgd-noprint'><div style='display:flex;justify-content:space-between;align-items:center;gap:8px'><h3 style='margin:0;font-size:15px'>\uD83D\uDCC1 Document Library</h3><button class='sgd-b sgd-s' id='sgl-x'>Close</button></div>" +
+                "<div style='margin:8px 0'><button class='sgl-tab " + (LS.view === "buyer" ? "on" : "") + "' data-view='buyer'>Buyer-wise</button><button class='sgl-tab " + (LS.view === "date" ? "on" : "") + "' data-view='date'>Date-wise</button> <input id='sgl-q' placeholder='Search title / buyer / style...' value='" + esc(LS.q) + "' style='padding:6px 10px;border:1px solid #e7e5e4;border-radius:999px;font:12px system-ui;min-width:180px'></div>" +
+                "<div><button class='sgd-b sgd-p' id='sgl-up'>\u2B06 Upload file</button><button class='sgd-b sgd-s' id='sgl-lk'>\uD83D\uDD17 Add link</button><button class='sgd-b sgd-s' id='sgl-nf'>\uFF0B New folder</button><span id='sgl-msg' style='font-size:11px;color:#57534e'></span><input type='file' id='sgl-file' multiple style='display:none'></div>" +
+                "<div class='sgl-bc'>" + (q ? "Search results" : crumbHtml) + "</div></div><div style='overflow-x:auto'><table class='sgl-t'>" + th + "<tbody>" + bd + "</tbody></table></div>";
+            lbox.querySelector("#sgl-x").onclick = function () { lback.style.display = "none" };
+            var qi = lbox.querySelector("#sgl-q"); qi.oninput = function () { LS.q = qi.value; var pos = qi.selectionStart; renderLib(); var n = lbox.querySelector("#sgl-q"); n.focus(); try { n.setSelectionRange(pos, pos) } catch (e) {} };
+            [].slice.call(lbox.querySelectorAll("[data-view]")).forEach(function (b) { b.onclick = function () { LS.view = b.getAttribute("data-view"); LS.path = []; LS.q = ""; renderLib() } });
+            [].slice.call(lbox.querySelectorAll("[data-go]")).forEach(function (b) { b.onclick = function (e) { if (e.target.closest("button")) return; LS.path = JSON.parse(b.getAttribute("data-go")); LS.q = ""; renderLib() } });
+            [].slice.call(lbox.querySelectorAll("[data-open]")).forEach(function (b) { b.onclick = function () { openDoc(b.getAttribute("data-open")) } });
+            [].slice.call(lbox.querySelectorAll("[data-dl]")).forEach(function (b) { b.onclick = function () { dlDoc(b.getAttribute("data-dl")) } });
+            [].slice.call(lbox.querySelectorAll("[data-del]")).forEach(function (b) { b.onclick = function () { delDoc(b.getAttribute("data-del")) } });
+            lbox.querySelector("#sgl-up").onclick = function () { lbox.querySelector("#sgl-file").click() };
+            lbox.querySelector("#sgl-file").onchange = function (e) { upload([].slice.call(e.target.files)); e.target.value = "" };
+            lbox.querySelector("#sgl-lk").onclick = addLink; lbox.querySelector("#sgl-nf").onclick = newFolder
+        }
+        function lmsg(t) { var m = lbox.querySelector("#sgl-msg"); if (m) m.textContent = " " + t }
+        async function openLib() { lback.style.display = "block"; if (!cache) lbox.innerHTML = "<div style='padding:20px;color:#78716c'>Loading library...</div>"; try { cache = await getIdx(); renderLib() } catch (e) { lbox.innerHTML = "<div style='padding:20px;color:#dc2626'>Library load aagala: " + esc(e && e.message || e) + " <button class='sgd-b sgd-s' onclick=\"document.getElementById('sgl-back').style.display='none'\">Close</button></div>" } }
+        function askMeta(df, opt) {
+            opt = opt || {};
+            return new Promise(function (res) {
+                var idx = cache || { cats: DEF_CATS.slice(), docs: [] }, bs = allBuyers(idx);
+                fbox.innerHTML = "<h3 style='margin:0 0 4px;font-size:15px'>" + (opt.head || "Save to folder") + "</h3><div class='sgl-f'>" +
+                    "<label>Buyer</label><input id='sgf-b' list='sgf-bl' placeholder='Buyer (blank = General)' value='" + esc(df.buyer || "") + "'><datalist id='sgf-bl'>" + bs.map(function (b) { return "<option value='" + esc(b) + "'>" }).join("") + "</datalist>" +
+                    "<label>Style no</label><input id='sgf-s' list='sgf-sl' placeholder='Style (blank = General)' value='" + esc(df.style || "") + "'><datalist id='sgf-sl'></datalist>" +
+                    "<label>Folder</label><select id='sgf-c'>" + idx.cats.map(function (c) { return "<option>" + esc(c) + "</option>" }).join("") + "</select><input id='sgf-nc' placeholder='...illa new folder name' style='margin-top:4px'>" +
+                    (opt.link ? "<label>Link (URL)</label><input id='sgf-u' placeholder='https://...'>" : "") +
+                    "<label>" + (opt.multi ? "Title (blank = file name)" : "Title") + "</label><input id='sgf-t' value='" + esc(df.title || "") + "'><label>Date</label><input type='date' id='sgf-d' value='" + esc(df.date || today()) + "'></div>" +
+                    "<div style='margin-top:12px;text-align:right'><button class='sgd-b sgd-s' id='sgf-x'>Cancel</button><button class='sgd-b sgd-p' id='sgf-ok'>Save</button></div>";
+                var g = function (i) { return fbox.querySelector(i) }, fillS = function () { var l = g("#sgf-sl"), b = g("#sgf-b").value; l.innerHTML = (b ? stylesOf(b, idx) : []).map(function (x) { return "<option value='" + esc(x) + "'>" }).join("") };
+                g("#sgf-c").value = idx.cats.indexOf(df.cat) >= 0 ? df.cat : idx.cats[0]; fillS(); g("#sgf-b").oninput = fillS;
+                fback.style.display = "flex";
+                g("#sgf-x").onclick = function () { fback.style.display = "none"; res(null) };
+                g("#sgf-ok").onclick = function () {
+                    var o = { buyer: g("#sgf-b").value.trim(), style: g("#sgf-s").value.trim(), cat: g("#sgf-nc").value.trim() || g("#sgf-c").value, title: g("#sgf-t").value.trim(), date: g("#sgf-d").value || today(), url: opt.link ? g("#sgf-u").value.trim() : "" };
+                    if (opt.link && !/^https?:\/\//i.test(o.url)) { alert("http:// illa https:// la start aagura link kudunga"); return }
+                    if (!opt.multi && !o.title) { alert("Title kudunga"); return }
+                    fback.style.display = "none"; res(o)
+                }
+            })
+        }
+        async function addDoc(meta, content) {
+            if (content) await putContent(meta.id, content);
+            await updIdx(function (v) { if (v.cats.map(K).indexOf(K(meta.cat)) < 0) v.cats.push(meta.cat); v.docs.push(meta) })
+        }
+        function mkMeta(o, extra) { return Object.assign({ id: sr(), title: o.title, buyer: o.buyer, style: o.style, cat: o.cat, date: o.date, created: Date.now() }, extra) }
+        async function saveCurrent() {
+            var msg = box.querySelector("#sgd-msg"), reg = st.mode === "reg", c = ctx();
+            var auto = st.mode === "auto", html = auto ? autoHTML(c) : reg ? previewHTML(c) : screenHTML(), stl = reg && st.style ? c.sm[st.style] : null, k = tabKey();
+            var catMap = { estimate: "Costing", overhead: "Costing", orderexp: "Costing", efficiency: "Efficiency", planactual: "Reports" };
+            try { if (!cache) cache = await getIdx() } catch (e) { msg.textContent = "Library connect aagala: " + (e && e.message || e); return }
+            var o = await askMeta({ buyer: stl ? stl.buyer || "" : "", style: stl ? stl.styleNo || "" : "", cat: auto ? "Reports" : catMap[k] || "Reports", title: auto ? "Daily Factory Report \u2014 " + fmtD(st.autoDate) : tabLabel() + " \u2014 " + (reg ? period() : fmtD(today())), date: auto ? st.autoDate : today() });
+            if (!o) return;
+            try {
+                if (html.length > 900000) html = html.replace(/src="data:[^"]{2000,}"/g, 'src=""');
+                await addDoc(mkMeta(o, { kind: "snap", size: html.length }), { html: html });
+                msg.textContent = "\u2713 Saved: " + (o.buyer || GEN) + " \u203A " + (o.style || GEN) + " \u203A " + o.cat
+            } catch (e) { msg.textContent = "Save failed: " + (e && e.message || e) }
+        }
+        function compressImg(file) {
+            return new Promise(function (res, rej) {
+                var r = new FileReader(); r.onerror = function () { rej(new Error("Read failed")) };
+                r.onload = function () { var im = new Image(); im.onerror = function () { rej(new Error("Image read failed")) }; im.onload = function () { var m = 1600, sc = Math.min(1, m / Math.max(im.width, im.height)), cv = document.createElement("canvas"); cv.width = Math.round(im.width * sc); cv.height = Math.round(im.height * sc); cv.getContext("2d").drawImage(im, 0, 0, cv.width, cv.height); var u = cv.toDataURL("image/jpeg", 0.7); res({ b64: u.split(",")[1], mime: "image/jpeg" }) }; im.src = r.result };
+                r.readAsDataURL(file)
+            })
+        }
+        function readB64(file) { return new Promise(function (res, rej) { var r = new FileReader(); r.onerror = function () { rej(new Error("Read failed")) }; r.onload = function () { res({ b64: String(r.result).split(",")[1] || "", mime: file.type || "application/octet-stream" }) }; r.readAsDataURL(file) }) }
+        async function upload(files) {
+            if (!files.length) return; var p = LS.path, o = await askMeta({ buyer: LS.view === "buyer" && p[0] && p[0] !== GEN ? p[0] : "", style: LS.view === "buyer" && p[1] && p[1] !== GEN ? p[1] : "", cat: LS.view === "buyer" ? p[2] || "Reports" : "Reports", title: "", date: today() }, { head: "Upload " + files.length + " file(s) to folder", multi: !0 });
+            if (!o) return; var ok = 0;
+            for (var i = 0; i < files.length; i++) {
+                var f = files[i]; lmsg("Uploading " + (i + 1) + "/" + files.length + "...");
+                try {
+                    var c = f.type.indexOf("image/") === 0 ? await compressImg(f) : await readB64(f);
+                    if (c.b64.length > 960000) throw new Error(f.name + ": " + Math.round(f.size / 1024) + " KB \u2014 700 KB mela upload panna mudiyadhu (Firestore limit). Compress pannunga illa \uD83D\uDD17 Add link use pannunga.");
+                    await addDoc(mkMeta(Object.assign({}, o, { title: files.length === 1 && o.title ? o.title : o.title && files.length > 1 ? o.title + " " + (i + 1) : f.name }), { kind: "file", mime: c.mime, name: f.name, size: Math.round(c.b64.length * 0.75) }), { b64: c.b64, mime: c.mime, name: f.name }); ok++
+                } catch (e) { alert(e && e.message || e) }
+            }
+            renderLib(); lmsg(ok + " file(s) saved.")
+        }
+        async function addLink() { var p = LS.path, o = await askMeta({ buyer: LS.view === "buyer" && p[0] && p[0] !== GEN ? p[0] : "", style: LS.view === "buyer" && p[1] && p[1] !== GEN ? p[1] : "", cat: LS.view === "buyer" ? p[2] || "Reports" : "Reports", title: "", date: today() }, { head: "Add link (Google Drive etc.)", link: !0 }); if (!o) return; try { await addDoc(mkMeta(o, { kind: "link", url: o.url, size: 0 })); renderLib(); lmsg("Link saved.") } catch (e) { lmsg("Failed: " + (e && e.message || e)) } }
+        async function newFolder() { var n = (window.prompt("New folder name (ellaa buyer / style-kum varum):") || "").trim(); if (!n) return; try { await updIdx(function (v) { if (v.cats.map(K).indexOf(K(n)) < 0) v.cats.push(n) }); renderLib(); lmsg("Folder added.") } catch (e) { lmsg("Failed: " + (e && e.message || e)) } }
+        function meta(id) { return (cache && cache.docs || []).filter(function (d) { return d.id === id })[0] }
+        function b64blob(b64, mime) { var bin = atob(b64), u = new Uint8Array(bin.length); for (var i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i); return new Blob([u], { type: mime }) }
+        function saveBlob(blob, name) { var a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = name; a.click() }
+        function pageCss() { var t = ""; [].slice.call(document.querySelectorAll("style")).forEach(function (x) { if (x.textContent.indexOf("tailwindcss") >= 0 || x.textContent.indexOf("sgd-doc") >= 0) t += x.textContent }); return t }
+        async function dlDoc(id) { var m = meta(id); if (!m) return; if (m.kind === "link") { window.open(m.url, "_blank"); return } try { var c = await getContent(id); if (!c) throw new Error("Content illa"); if (m.kind === "snap") saveBlob(new Blob(["<!doctype html><html><head><meta charset='utf-8'><title>" + esc(m.title) + "</title><style>" + pageCss() + "</style></head><body style='padding:16px'>" + c.html + "</body></html>"], { type: "text/html" }), (m.title.replace(/[^A-Za-z0-9 _-]+/g, "") || "document") + ".html"); else saveBlob(b64blob(c.b64, c.mime), c.name || "file") } catch (e) { lmsg("Download failed: " + (e && e.message || e)) } }
+        async function openDoc(id) {
+            var m = meta(id); if (!m) return; if (m.kind === "link") { window.open(m.url, "_blank"); return }
+            vbox.innerHTML = "<div style='padding:20px;color:#78716c'>Loading...</div>"; vback.style.display = "block";
+            try {
+                var c = await getContent(id); if (!c) throw new Error("Content kidaikkala");
+                var bar = "<div class='sgd-noprint' style='display:flex;justify-content:space-between;gap:8px;align-items:center;margin-bottom:8px'><b>" + esc(m.title) + "</b><span><button class='sgd-b sgd-s' id='sgv-p'>Print / PDF</button><button class='sgd-b sgd-s' id='sgv-d'>\u2B07 Download</button><button class='sgd-b sgd-p' id='sgv-x'>Close</button></span></div><div class='sgd-noprint' style='font-size:11px;color:#78716c;margin-bottom:6px'>" + esc(bOf(m) + " \u203A " + (m.style || GEN) + " \u203A " + m.cat + " \u00B7 " + fmtD(m.date)) + "</div>", body;
+                if (m.kind === "snap") body = c.html; else if ((c.mime || "").indexOf("image") === 0) body = "<img style='max-width:100%' src='data:" + esc(c.mime) + ";base64," + c.b64 + "'>"; else if ((c.mime || "").indexOf("pdf") >= 0) { window.__sglUrl && URL.revokeObjectURL(window.__sglUrl); window.__sglUrl = URL.createObjectURL(b64blob(c.b64, "application/pdf")); body = "<iframe src='" + window.__sglUrl + "' style='width:100%;height:78vh;border:1px solid #e7e5e4;border-radius:8px'></iframe>" } else body = "<div style='padding:20px;color:#57534e'>Intha file type preview illa \u2014 \u2B07 Download pannunga.</div>";
+                vbox.innerHTML = bar + "<div>" + body + "</div>";
+                vbox.querySelector("#sgv-x").onclick = function () { vback.style.display = "none" }; vbox.querySelector("#sgv-d").onclick = function () { dlDoc(id) };
+                vbox.querySelector("#sgv-p").onclick = function () { document.body.classList.add("sgl-printing"); window.print(); setTimeout(function () { document.body.classList.remove("sgl-printing") }, 500) }
+            } catch (e) { vbox.innerHTML = "<div style='padding:20px;color:#dc2626'>Open failed: " + esc(e && e.message || e) + " <button class='sgd-b sgd-s' id='sgv-x'>Close</button></div>"; vbox.querySelector("#sgv-x").onclick = function () { vback.style.display = "none" } }
+        }
+        async function delDoc(id) { var m = meta(id); if (!m || !window.confirm("Delete \"" + m.title + "\"? Thirumba edukka mudiyadhu.")) return; try { await updIdx(function (v) { v.docs = v.docs.filter(function (d) { return d.id !== id }) }); if (m.kind !== "link") { try { NG(lb(Jee, Yee, "sgps-doc-" + id), { value: null }).catch(function () {}) } catch (e) {} } renderLib(); lmsg("Deleted.") } catch (e) { lmsg("Delete failed: " + (e && e.message || e)) } }
+
+        /* ===== Auto Daily Report: built from existing entries + lines + styles (no new entry) ===== */
+        function latestDate(c) { var m = ""; (window.__sgEntries || []).forEach(function (e) { if (e.date > m && c.inScope(e)) m = e.date }); return m || today() }
+        var pc1 = function (x) { return isFinite(x) ? (x * 100).toFixed(1) + "%" : "" };
+        function autoSections(date) {
+            var c = ctx(), all = (window.__sgEntries || []).filter(function (e) { return c.inScope(e) }), day = all.filter(function (e) { return e.date === date }), out = [], rows = [], agg = null;
+            if (!day.length) return { c: c, secs: [], none: !0 };
+            try { rows = sgEffBuild(c.styles, day, c.lines, window.__sgLinePlans || [], c.fac || "Factory").map(function (r) { r._c = sgEffCalc(r); return r }).sort(function (a, b) { return String(a.l).localeCompare(String(b.l), void 0, { numeric: !0 }) || String(a.st).localeCompare(String(b.st), void 0, { numeric: !0 }) }); agg = rows.length ? sgEffAgg(rows) : null } catch (e) { rows = []; agg = null }
+            if (rows.length) out.push({ sheet: "Efficiency", title: "1. Line-wise Production & Efficiency (Plan vs Actual)", head: ["Line", "Buyer", "Style", "Description", "SMV", "Plan target", "Plan directs", "Actual directs", "Output", "OT hrs", "Planned eff", "Actual eff", "Eff + OT", "Factory loss", "Internal loss", "External loss"],
+                rows: rows.map(function (r) { var k = r._c, av = k.avail; return [r.l, r.b, r.st, r.ds, +(+r.sq).toFixed(2), r.tg, Math.round(k.pD), Math.round(k.aD), k.total, +(+r.ta).toFixed(1), pc1(k.planEff), pc1(k.eff7), pc1(k.effOT), pc1(av ? k.fac / av : 0), pc1(av ? k.int / av : 0), pc1(av ? k.ext / av : 0)] }),
+                tot: agg ? ["TOTAL", "", "", "", "", agg.tg, Math.round(agg.pD), Math.round(agg.aD), agg.total, "", pc1(agg.planEff), pc1(agg.eff7), pc1(agg.effOT), pc1(agg.pct(agg.fac)), pc1(agg.pct(agg.int)), pc1(agg.pct(agg.ext))] : null });
+            var cum = {}, dd = {};
+            all.forEach(function (e) { if (e.date > date) return; var q = N(e.qty), o = cum[e.styleId] = cum[e.styleId] || {}; o[e.type] = (o[e.type] || 0) + q; if (e.date === date) { var d = dd[e.styleId] = dd[e.styleId] || {}; d[e.type] = (d[e.type] || 0) + q } });
+            var sum = Object.keys(dd).map(function (id) { var d = dd[id], m = cum[id] || {}, s = c.sm[id] || {}; return [s.buyer || "", s.styleNo || "(deleted style)", N(d.cutting), N(m.cutting), N(d.feeding), N(d.sewing), N(m.sewing), N(d.packing), N(m.packing), N(d.cuttingReject) + N(d.sewingReject) + N(d.sewingLoss), N(d.rework), N(m.cutting) - N(m.sewing), N(m.sewing) - N(m.packing)] }).sort(function (a, b) { return String(a[0]).localeCompare(String(b[0])) || String(a[1]).localeCompare(String(b[1]), void 0, { numeric: !0 }) });
+            if (sum.length) out.push({ sheet: "Dept Summary", title: "2. Style-wise Department Summary (Day & Cumulative)", head: ["Buyer", "Style", "Cut (day)", "Cut (cum)", "Feed (day)", "Sew (day)", "Sew (cum)", "Pack (day)", "Pack (cum)", "Reject (day)", "Rework (day)", "Cut\u2192Sew WIP", "Sew\u2192Pack WIP"], rows: sum, tot: ["TOTAL", ""].concat([2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map(function (i) { return sum.reduce(function (a, r) { return a + N(r[i]) }, 0) })) });
+            var dt = day.filter(function (e) { return e.type === "downtime" }).map(function (e) { return [c.ln(e), c.sn(e), e.machineNo || "", e.reason || "", N(e.qty)] });
+            if (dt.length) out.push({ sheet: "Downtime", title: "3. Downtime / Loss Details", head: ["Line", "Style", "Machine No", "Reason", "Minutes"], rows: dt, tot: ["TOTAL", "", "", "", dt.reduce(function (a, r) { return a + r[4] }, 0)] });
+            var ot = day.filter(function (e) { return e.type === "ot" }).map(function (e) { return [c.ln(e), c.sn(e), e.dept || "", N(e.otManpower), N(e.otHours), N(e.otManpower) * N(e.otHours)] });
+            if (ot.length) out.push({ sheet: "Overtime", title: "4. Overtime", head: ["Line", "Style", "Department", "OT Manpower", "OT Hours", "Man-hours"], rows: ot, tot: ["TOTAL", "", "", "", "", ot.reduce(function (a, r) { return a + r[5] }, 0)] });
+            return { c: c, secs: out, none: !out.length }
+        }
+        function autoHTML(c) {
+            var d = st.autoDate || latestDate(c), A = autoSections(d);
+            var h = "<div class='sgd-doc'><div class='sgd-dh'><div><b>" + esc(A.c.fac || "SGPS") + "</b><br><span>Daily Factory Report</span></div><div style='text-align:right'><span>Report date: " + esc(fmtD(d)) + "</span><br><span>Generated: " + esc(fmtD(today())) + " \u00B7 auto from daily entries</span></div></div>";
+            if (A.none) return h + "<div class='sgd-empty'>" + esc(fmtD(d)) + " date-ku entry illa. Vera date select pannunga.</div></div>";
+            A.secs.forEach(function (sc) {
+                var right = function (v) { return typeof v === "number" || /^-?[\d.,]+%$/.test(String(v)) };
+                h += "<div class='sgd-sec'>" + esc(sc.title) + "</div><div class='sgd-wrap'><table><thead><tr>" + sc.head.map(function (x) { return "<th>" + esc(x) + "</th>" }).join("") + "</tr></thead><tbody>" + sc.rows.map(function (r) { return "<tr>" + r.map(function (v) { return "<td" + (right(v) ? " class='r'" : "") + ">" + fmtN(v) + "</td>" }).join("") + "</tr>" }).join("") + "</tbody>" + (sc.tot ? "<tfoot><tr>" + sc.tot.map(function (v) { return "<td class='r'>" + fmtN(v) + "</td>" }).join("") + "</tr></tfoot>" : "") + "</table></div>"
+            });
+            return h + "<div class='sgd-sign'><span>Prepared by</span><span>Checked by</span><span>Approved by</span></div></div>"
+        }
+        function exportAuto() {
+            var msg = box.querySelector("#sgd-msg"), c = ctx(), d = st.autoDate || latestDate(c), A = autoSections(d);
+            try {
+                if (A.none) { msg.textContent = "Intha date-ku entry illa."; return }
+                var wb = $a.book_new(), used = {};
+                A.secs.forEach(function (sc) {
+                    var aoa = [[(A.c.fac || "SGPS") + " \u2014 Daily Factory Report"], ["Report date: " + d + "   " + sc.title], [], sc.head].concat(sc.rows); if (sc.tot) aoa.push(sc.tot);
+                    var ws = $a.aoa_to_sheet(aoa); ws["!cols"] = sc.head.map(function (x) { return { wch: Math.max(10, x.length + 3) } });
+                    var nm = sc.sheet; while (used[nm.toLowerCase()]) nm = nm.slice(0, 25) + "_2"; used[nm.toLowerCase()] = 1; $a.book_append_sheet(wb, ws, nm)
+                });
+                var fn = "SGPS_DailyFactoryReport_" + d + ".xlsx"; TD(wb, fn); msg.textContent = "Excel downloaded: " + fn
+            } catch (e) { msg.textContent = "Export failed: " + (e && e.message || e) }
+        }
+
+        window.__sgLibOpen = openLib;
+        window.__sgDocsOpen = open; window.__sgDocsState = st;
+        var tt; function showToast(list) {
+            var depts = {}; list.forEach(function (e) { var d = DEPTS.filter(function (x) { return x.types.indexOf(e.type) >= 0 })[0]; if (d) depts[d.label] = 1 });
+            var names = Object.keys(depts), label = list.length === 1 ? names[0] + " entry saved" : list.length + " entries saved (" + names.join(", ") + ")";
+            toast.innerHTML = "<span>\u2713 " + esc(label) + "</span><button style='background:#14b8a6;color:#fff' id='sgd-tp'>Preview</button><button style='background:#44403c;color:#fff' id='sgd-tx'>\u00D7</button>"; toast.style.display = "flex";
+            toast.querySelector("#sgd-tx").onclick = function () { toast.style.display = "none" };
+            toast.querySelector("#sgd-tp").onclick = function () {
+                toast.style.display = "none"; var ids = {}, dates = list.map(function (e) { return e.date }).sort(), ks = Object.keys(depts);
+                list.forEach(function (e) { ids[e.id] = 1 }); st.ids = ids; st.from = dates[0]; st.to = dates[dates.length - 1];
+                var dk = {}; list.forEach(function (e) { DEPTS.forEach(function (d) { if (d.types.indexOf(e.type) >= 0) dk[d.k] = 1 }) }); var keys = Object.keys(dk); st.dept = keys.length === 1 ? keys[0] : "all"; st.style = ""; st.line = ""; st.mode = "reg"; open()
+            };
+            clearTimeout(tt); tt = setTimeout(function () { toast.style.display = "none" }, 10000)
+        }
+        var prev = null;
+        window.__sgEntriesSeen = function (r, local) {
+            window.__sgEntries = r;
+            if (local && prev) { var ch = r.filter(function (x) { return prev[x.id] !== x }); if (ch.length && ch.length < 400) showToast(ch) }
+            prev = {}; r.forEach(function (x) { prev[x.id] = x })
+        }
+    })();
+
     var mFe = document.getElementById("root"),
         gFe = (0, Cte.createRoot)(mFe);
     gFe.render(yte.default.createElement(w3, null));
